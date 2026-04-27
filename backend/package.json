@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "seed": "node src/seedMaster.js"
+    "seed": "node src/seedMaster.js",
+    "clear-mock-data": "node src/scripts/clear_mock_data.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
