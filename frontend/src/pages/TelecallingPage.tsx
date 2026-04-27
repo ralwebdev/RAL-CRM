@@ -1,6 +1,14 @@
-import { useState, useMemo, useCallback } from "react";
-import { store } from "@/lib/mock-data";
-import { CallLog, CallOutcome, Lead, LeadStatus, Admission, NotInterestedReason, FollowUpType, ConversationInsight } from "@/lib/types";
+import { useState, useMemo, useCallback, useEffect } from "react";
+import { useAuth } from "@/lib/auth-context";
+import { CallLog, CallOutcome, Lead, LeadStatus, Admission, FollowUp, NotInterestedReason, FollowUpType, ConversationInsight, User as AppUser } from "@/lib/types";
+import { fetchMarketingAdmissions, fetchMarketingLeads, updateMarketingLead } from "@/lib/marketing-api";
+import {
+  createTelecallingCallLog,
+  createTelecallingFollowUp,
+  fetchTelecallingCallLogs,
+  fetchTelecallingFollowUps,
+  fetchTelecallingUsers,
+} from "@/lib/telecalling-api";
 import {
   MASTER_CALL_OUTCOMES, MASTER_OBJECTIONS, MASTER_FOLLOWUP_TYPES,
   MASTER_CAREER_GOALS, MASTER_LEAD_MOTIVATIONS, MASTER_COURSE_NAMES,
@@ -20,7 +28,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   Phone, PhoneCall, Clock, AlertTriangle, Users, Target, Zap, Timer, Activity,
   MessageSquare, Calendar, ChevronRight, Eye, Send, ArrowRight, CheckCircle2,
-  XCircle, PhoneOff, BarChart3, TrendingUp, User, Star, Lightbulb
+  XCircle, PhoneOff, BarChart3, TrendingUp, User, Star, Lightbulb, Loader2
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -81,15 +89,49 @@ function outcomeBg(o: CallOutcome) {
    COMPONENT
    ═══════════════════════════════════════════════════════════════ */
 export default function TelecallingPage() {
-  const [callLogs, setCallLogs] = useState<CallLog[]>(store.getCallLogs());
-  const [followUps, setFollowUps] = useState(store.getFollowUps());
-  const leads = store.getLeads();
-  const admissions = store.getAdmissions();
-  const users = store.getUsers();
+  const { currentUser: authUser, allUsers: authUsers } = useAuth();
+  const [users, setUsers] = useState<AppUser[]>(authUsers);
+  const [callLogs, setCallLogs] = useState<CallLog[]>([]);
+  const [followUps, setFollowUps] = useState<FollowUp[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [admissions, setAdmissions] = useState<Admission[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const currentUser = users.find((u) => u.id === "u3")!;
+  // Safety check for current user
+  const currentUser = authUser || users.find((u) => u.role === "telecaller") || users[0] || authUsers[0];
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const [leadRows, admissionRows, callLogRows, followUpRows, userRows] = await Promise.all([
+          fetchMarketingLeads(),
+          fetchMarketingAdmissions(),
+          fetchTelecallingCallLogs(),
+          fetchTelecallingFollowUps(),
+          fetchTelecallingUsers(),
+        ]);
+        if (!active) return;
+        setLeads(leadRows);
+        setAdmissions(admissionRows);
+        setCallLogs(callLogRows);
+        setFollowUps(followUpRows);
+        setUsers(userRows.length > 0 ? userRows : authUsers);
+      } catch (err) {
+        if (!active) return;
+        setUsers(authUsers);
+        showToast("Unable to load telecalling data from backend.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    void load();
+    return () => { active = false; };
+  }, [authUsers]);
+
   const allLeads = leads.filter((l) => l.status !== "Admission" && l.status !== "Lost");
-  const assignedLeads = leads.filter((l) => l.assignedTelecallerId === currentUser.id);
+  const assignedLeads = currentUser ? leads.filter((l) => l.assignedTelecallerId === currentUser.id) : [];
   const activeAssigned = assignedLeads.filter((l) => l.status !== "Admission" && l.status !== "Lost");
 
   const [activeTab, setActiveTab] = useState("queue");
@@ -125,7 +167,7 @@ export default function TelecallingPage() {
 
   /* ─── Derived data ─── */
   const today = new Date().toISOString().split("T")[0];
-  const myLogs = callLogs.filter((cl) => cl.telecallerId === currentUser.id);
+  const myLogs = currentUser ? callLogs.filter((cl) => cl.telecallerId === currentUser.id) : [];
   const todayLogs = myLogs.filter((cl) => cl.createdAt === today);
   const connectedToday = todayLogs.filter((cl) => cl.outcome === "Connected" || cl.outcome === "Interested").length;
 
@@ -138,8 +180,9 @@ export default function TelecallingPage() {
 
   // Follow-ups due today
   const followUpsDueToday = useMemo(() => {
+    if (!currentUser) return [];
     return followUps.filter((f) => f.assignedTo === currentUser.id && f.date <= today && !f.completed);
-  }, [followUps, currentUser.id, today]);
+  }, [followUps, currentUser, today]);
 
   /* ─── ATT Calculations ─── */
   const conversionData = useMemo(() => {
@@ -266,7 +309,7 @@ export default function TelecallingPage() {
     setShowOutcomeForm(true);
   };
 
-  const saveCallOutcome = () => {
+  const saveCallOutcome = async () => {
     if (!selectedLead) return;
     if (!outcomeForm.outcome) { setOutcomeError("Please select a call outcome before saving."); return; }
     if (outcomeForm.outcome === "Not interested" && !outcomeForm.notInterestedReason) {
@@ -276,8 +319,8 @@ export default function TelecallingPage() {
       setOutcomeError("Follow-up date is required."); return;
     }
 
-    const newLog: CallLog = {
-      id: `cl${Date.now()}`, leadId: selectedLead.id, telecallerId: currentUser.id,
+    const newLog: Partial<CallLog> = {
+      leadId: selectedLead.id, telecallerId: currentUser?.id || "unknown",
       outcome: outcomeForm.outcome as CallOutcome, notes: outcomeForm.notes,
       nextFollowUp: outcomeForm.followUpDate || outcomeForm.callbackDate,
       nextFollowUpTime: outcomeForm.followUpTime || outcomeForm.callbackTime,
@@ -288,34 +331,58 @@ export default function TelecallingPage() {
       callbackTime: outcomeForm.callbackTime || undefined,
       createdAt: today,
     };
-    const updated = [...callLogs, newLog];
-    setCallLogs(updated);
-    store.saveCallLogs(updated);
+    try {
+      const createdLog = await createTelecallingCallLog(newLog);
+      setCallLogs((prev) => [...prev, createdLog]);
 
-    // If walk-in scheduled, update lead
-    if (outcomeForm.scheduleWalkIn && outcomeForm.walkInDate) {
-      const allLeadsData = store.getLeads();
-      const updatedLeads = allLeadsData.map((l) =>
-        l.id === selectedLead.id
-          ? { ...l, walkInStatus: "Scheduled" as const, walkInDate: outcomeForm.walkInDate, walkInTime: outcomeForm.walkInTime, walkInCounselor: "u5", assignedCounselor: "u5",
-              activities: [...(l.activities || []), { id: `act${Date.now()}`, leadId: selectedLead.id, type: "Walk-in Scheduled" as const, description: `Walk-in scheduled for ${outcomeForm.walkInDate}`, timestamp: new Date().toISOString(), performedBy: currentUser.id }] }
-          : l
-      );
-      store.saveLeads(updatedLeads);
-    }
+      // If walk-in scheduled, update lead
+      if (outcomeForm.scheduleWalkIn && outcomeForm.walkInDate) {
+        const defaultCounselor = users.find(u => u.role === 'counselor')?.id || "u5";
+        const currentLead = leads.find((l) => l.id === selectedLead.id);
+        if (currentLead) {
+          const patchedLead: Lead = {
+            ...currentLead,
+            walkInStatus: "Scheduled",
+            walkInDate: outcomeForm.walkInDate,
+            walkInTime: outcomeForm.walkInTime,
+            walkInCounselor: defaultCounselor,
+            assignedCounselor: defaultCounselor,
+            activities: [
+              ...(currentLead.activities || []),
+              {
+                id: `act${Date.now()}`,
+                leadId: selectedLead.id,
+                type: "Walk-in Scheduled",
+                description: `Walk-in scheduled for ${outcomeForm.walkInDate}`,
+                timestamp: new Date().toISOString(),
+              },
+            ],
+          };
+          const savedLead = await updateMarketingLead(currentLead.id, patchedLead);
+          setLeads((prev) => prev.map((l) => (l.id === savedLead.id ? savedLead : l)));
+        }
+      }
 
-    // If follow-up scheduled, add to follow-ups
-    if (outcomeForm.followUpDate) {
-      const newFU = {
-        id: `f${Date.now()}`, leadId: selectedLead.id, assignedTo: currentUser.id,
-        date: outcomeForm.followUpDate, notes: outcomeForm.notes, completed: false, createdAt: today,
-      };
-      const updatedFU = [...followUps, newFU];
-      setFollowUps(updatedFU);
-      store.saveFollowUps(updatedFU);
-      showToast(outcomeForm.scheduleWalkIn ? "Walk-in counseling scheduled successfully." : "Call outcome recorded. Follow-up added to your task queue.");
-    } else {
-      showToast(outcomeForm.scheduleWalkIn ? "Walk-in counseling scheduled successfully." : "Call outcome recorded successfully.");
+      // If follow-up scheduled, add to follow-ups
+      if (outcomeForm.followUpDate) {
+        const createdFU = await createTelecallingFollowUp({
+          leadId: selectedLead.id,
+          assignedTo: currentUser?.id || "unknown",
+          date: outcomeForm.followUpDate,
+          followUpTime: outcomeForm.followUpTime || outcomeForm.callbackTime,
+          notes: outcomeForm.notes,
+          completed: false,
+          createdAt: today,
+          followUpType: (outcomeForm.followUpType as FollowUpType) || undefined,
+        });
+        setFollowUps((prev) => [...prev, createdFU]);
+        showToast(outcomeForm.scheduleWalkIn ? "Walk-in counseling scheduled successfully." : "Call outcome recorded. Follow-up added to your task queue.");
+      } else {
+        showToast(outcomeForm.scheduleWalkIn ? "Walk-in counseling scheduled successfully." : "Call outcome recorded successfully.");
+      }
+    } catch {
+      setOutcomeError("Failed to save call outcome to backend.");
+      return;
     }
 
     // Auto-load next lead
@@ -403,6 +470,19 @@ export default function TelecallingPage() {
   /* ═══════════════════════════════════════════════════════════════
      RENDER
      ═══════════════════════════════════════════════════════════════ */
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="rounded-xl bg-card p-8 shadow-card">
+          <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading telecalling data...
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Toast */}
@@ -415,7 +495,7 @@ export default function TelecallingPage() {
 
       <div>
         <h1 className="text-2xl font-bold text-foreground">Telecalling</h1>
-        <p className="text-sm text-muted-foreground">Welcome, {currentUser.name}</p>
+        <p className="text-sm text-muted-foreground">Welcome, {currentUser?.name || "User"}</p>
       </div>
 
       {/* Top stat cards */}
@@ -1070,16 +1150,19 @@ export default function TelecallingPage() {
           <KanbanBoard
             leads={activeAssigned}
             onLeadSelect={setSelectedLead}
-            onLeadStatusChange={(leadId: string, newStatus: LeadStatus) => {
+            onLeadStatusChange={async (leadId: string, newStatus: LeadStatus) => {
               const lead = leads.find((l) => l.id === leadId);
               if (!lead) return;
               const updated = { ...lead, status: newStatus, activities: [...(lead.activities || []), {
                 id: `act${Date.now()}`, leadId, type: `Status → ${newStatus}`,
                 description: `Moved to ${newStatus} via telecaller pipeline`, timestamp: new Date().toISOString(),
               }] };
-              const all = leads.map((l) => l.id === leadId ? updated : l);
-              store.saveLeads(all);
-              window.location.reload();
+              try {
+                const saved = await updateMarketingLead(leadId, updated);
+                setLeads((prev) => prev.map((l) => (l.id === leadId ? saved : l)));
+              } catch {
+                showToast("Failed to update lead status.");
+              }
             }}
           />
         </TabsContent>

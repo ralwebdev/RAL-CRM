@@ -43,18 +43,17 @@ function daysBetween(a: string, b: string) {
 }
 
 export default function CounselingPage() {
-  const { currentUser } = useAuth();
+  const { currentUser, allUsers: users } = useAuth();
   const [leads, setLeads] = useState<Lead[]>(store.getLeads());
   const [followUps, setFollowUps] = useState(store.getFollowUps());
   const admissions = store.getAdmissions();
-  const users = store.getUsers();
   const today = new Date().toISOString().split("T")[0];
 
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [activeTab, setActiveTab] = useState("walkins");
 
   // Filter counselor's leads
-  const counselorId = currentUser?.id || "u5";
+  const counselorId = currentUser?.id || users.find(u => u.role === 'counselor')?.id || users[0]?.id;
   const myLeads = leads.filter((l) => l.assignedCounselor === counselorId || l.walkInCounselor === counselorId);
   const walkInScheduled = myLeads.filter((l) => l.walkInStatus === "Scheduled");
   const walkInCompleted = myLeads.filter((l) => l.walkInStatus === "Completed");

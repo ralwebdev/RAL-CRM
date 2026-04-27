@@ -2,7 +2,11 @@ import CallLog from '../models/CallLog.js';
 
 export const getCallLogs = async (req, res) => {
   try {
-    const logs = await CallLog.find();
+    let query = {};
+    if (req.user?.role === 'telecaller') {
+      query.telecallerId = req.user._id;
+    }
+    const logs = await CallLog.find(query);
     res.json(logs);
   } catch (error) {
     res.status(500).json({ message: error.message });

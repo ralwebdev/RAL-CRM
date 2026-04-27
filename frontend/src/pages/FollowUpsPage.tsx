@@ -1,53 +1,138 @@
-import { useState } from "react";
-import { store } from "@/lib/mock-data";
-import { FollowUp, FollowUpType } from "@/lib/types";
+import { useEffect, useMemo, useState } from "react";
+import { useAuth } from "@/lib/auth-context";
+import { FollowUp, FollowUpType, Lead, User as AppUser } from "@/lib/types";
 import { MASTER_FOLLOWUP_TYPES } from "@/lib/master-schema";
+import { fetchMarketingLeads } from "@/lib/marketing-api";
+import {
+  createTelecallingFollowUp,
+  fetchTelecallingFollowUps,
+  fetchTelecallingUsers,
+  updateTelecallingFollowUp,
+} from "@/lib/telecalling-api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { CalendarClock, Check, Plus } from "lucide-react";
+import { CalendarClock, Check, Loader2, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 export default function FollowUpsPage() {
-  const [followUps, setFollowUps] = useState<FollowUp[]>(store.getFollowUps());
+  const { currentUser } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [followUps, setFollowUps] = useState<FollowUp[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [users, setUsers] = useState<AppUser[]>([]);
   const [open, setOpen] = useState(false);
-  const leads = store.getLeads();
-  const users = store.getUsers();
 
-  const [form, setForm] = useState({ leadId: "", assignedTo: "", date: "", time: "", notes: "", followUpType: "" as FollowUpType | "" });
+  const [form, setForm] = useState({
+    leadId: "",
+    assignedTo: currentUser?.id || "",
+    date: "",
+    time: "",
+    notes: "",
+    followUpType: "" as FollowUpType | "",
+  });
 
-  const handleCreate = () => {
-    const newFU: FollowUp = {
-      id: `f${Date.now()}`,
-      leadId: form.leadId,
-      assignedTo: form.assignedTo,
-      date: form.date,
-      notes: form.notes,
-      completed: false,
-      createdAt: new Date().toISOString().split("T")[0],
-      followUpType: (form.followUpType as FollowUpType) || undefined,
-      followUpTime: form.time || undefined,
+  useEffect(() => {
+    if (!currentUser || form.assignedTo) return;
+    setForm((prev) => ({ ...prev, assignedTo: currentUser.id }));
+  }, [currentUser, form.assignedTo]);
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const [followUpRows, leadRows, userRows] = await Promise.all([
+          fetchTelecallingFollowUps(),
+          fetchMarketingLeads(),
+          fetchTelecallingUsers(),
+        ]);
+        if (!active) return;
+        setFollowUps(followUpRows);
+        setLeads(leadRows);
+        setUsers(userRows);
+      } catch (err: any) {
+        if (!active) return;
+        toast.error(err?.response?.data?.message || "Could not load follow-ups from backend.");
+      } finally {
+        if (active) setLoading(false);
+      }
     };
-    const updated = [...followUps, newFU];
-    setFollowUps(updated);
-    store.saveFollowUps(updated);
-    setForm({ leadId: "", assignedTo: "", date: "", time: "", notes: "", followUpType: "" });
-    setOpen(false);
+
+    void load();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleCreate = async () => {
+    if (!form.leadId || !form.date) return;
+    setSubmitting(true);
+    try {
+      const created = await createTelecallingFollowUp({
+        leadId: form.leadId,
+        assignedTo: form.assignedTo || currentUser?.id || "",
+        date: form.date,
+        followUpTime: form.time || undefined,
+        notes: form.notes,
+        completed: false,
+        followUpType: (form.followUpType as FollowUpType) || undefined,
+      });
+      setFollowUps((prev) => [...prev, created]);
+      setForm({
+        leadId: "",
+        assignedTo: currentUser?.id || "",
+        date: "",
+        time: "",
+        notes: "",
+        followUpType: "",
+      });
+      setOpen(false);
+      toast.success("Follow-up scheduled.");
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to schedule follow-up.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const toggleComplete = (id: string) => {
-    const updated = followUps.map((f) => (f.id === id ? { ...f, completed: !f.completed } : f));
-    setFollowUps(updated);
-    store.saveFollowUps(updated);
+  const toggleComplete = async (id: string) => {
+    const target = followUps.find((f) => f.id === id);
+    if (!target) return;
+    setUpdatingId(id);
+    try {
+      const updated = await updateTelecallingFollowUp(id, { completed: !target.completed });
+      setFollowUps((prev) => prev.map((f) => (f.id === id ? updated : f)));
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to update follow-up.");
+    } finally {
+      setUpdatingId(null);
+    }
   };
 
   const today = new Date().toISOString().split("T")[0];
-  const upcoming = followUps.filter((f) => !f.completed && f.date >= today).sort((a, b) => a.date.localeCompare(b.date));
-  const overdue = followUps.filter((f) => !f.completed && f.date < today);
-  const completed = followUps.filter((f) => f.completed);
+
+  const byDate = (a: FollowUp, b: FollowUp) => {
+    return `${a.date} ${a.followUpTime || ""}`.localeCompare(`${b.date} ${b.followUpTime || ""}`);
+  };
+
+  const upcoming = useMemo(() => {
+    return followUps.filter((f) => !f.completed && f.date >= today).sort(byDate);
+  }, [followUps, today]);
+
+  const overdue = useMemo(() => {
+    return followUps.filter((f) => !f.completed && f.date < today).sort(byDate);
+  }, [followUps, today]);
+
+  const completed = useMemo(() => {
+    return followUps.filter((f) => f.completed).sort((a, b) => byDate(b, a));
+  }, [followUps]);
 
   const renderList = (items: FollowUp[], label: string, emptyText: string) => (
     <div>
@@ -57,18 +142,23 @@ export default function FollowUpsPage() {
         {items.map((f) => {
           const lead = leads.find((l) => l.id === f.leadId);
           const user = users.find((u) => u.id === f.assignedTo);
+
           return (
             <div key={f.id} className={cn("flex items-start gap-3 rounded-lg border p-3 transition-colors", f.completed && "opacity-60")}>
-              <button onClick={() => toggleComplete(f.id)} className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors", f.completed ? "border-success bg-success" : "border-input hover:border-primary")}>
+              <button
+                onClick={() => void toggleComplete(f.id)}
+                disabled={updatingId === f.id}
+                className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors disabled:opacity-50", f.completed ? "border-success bg-success" : "border-input hover:border-primary")}
+              >
                 {f.completed && <Check className="h-3 w-3 text-success-foreground" />}
               </button>
-              <div className="flex-1 min-w-0">
+              <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-card-foreground">{lead?.name || "Unknown Lead"}</p>
                 <p className="text-xs text-muted-foreground">{f.notes}</p>
                 <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
                   <span className="flex items-center gap-1"><CalendarClock className="h-3 w-3" />{f.date}{f.followUpTime ? ` at ${f.followUpTime}` : ""}</span>
                   {f.followUpType && <span className="rounded-full bg-accent px-2 py-0.5 text-[10px]">{f.followUpType}</span>}
-                  {user && <span>→ {user.name}</span>}
+                  {user && <span>-&gt; {user.name}</span>}
                 </div>
               </div>
             </div>
@@ -80,7 +170,7 @@ export default function FollowUpsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 justify-between sm:flex-row sm:items-center">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-foreground">Follow-ups</h1>
           <p className="text-xs sm:text-sm text-muted-foreground">Track and manage lead follow-ups</p>
@@ -118,23 +208,36 @@ export default function FollowUpsPage() {
                 </Select>
               </div>
               <div><Label>Notes</Label><Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} /></div>
-              <Button onClick={handleCreate} className="w-full" disabled={!form.leadId || !form.date}>Schedule</Button>
+              <Button onClick={() => void handleCreate()} className="w-full" disabled={submitting || !form.leadId || !form.date}>
+                {submitting ? (
+                  <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Scheduling...</span>
+                ) : "Schedule"}
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
       </div>
 
-      <div className="grid gap-6 grid-cols-1 lg:grid-cols-3">
-        <div className="rounded-xl bg-card p-5 shadow-card">
-          {renderList(overdue, "Overdue", "No overdue follow-ups")}
+      {loading ? (
+        <div className="rounded-xl bg-card p-8 shadow-card">
+          <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading follow-ups...
+          </div>
         </div>
-        <div className="rounded-xl bg-card p-5 shadow-card">
-          {renderList(upcoming, "Upcoming", "No upcoming follow-ups")}
+      ) : (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div className="rounded-xl bg-card p-5 shadow-card">
+            {renderList(overdue, "Overdue", "No overdue follow-ups")}
+          </div>
+          <div className="rounded-xl bg-card p-5 shadow-card">
+            {renderList(upcoming, "Upcoming", "No upcoming follow-ups")}
+          </div>
+          <div className="rounded-xl bg-card p-5 shadow-card">
+            {renderList(completed, "Completed", "No completed follow-ups")}
+          </div>
         </div>
-        <div className="rounded-xl bg-card p-5 shadow-card">
-          {renderList(completed, "Completed", "No completed follow-ups")}
-        </div>
-      </div>
+      )}
     </div>
   );
 }

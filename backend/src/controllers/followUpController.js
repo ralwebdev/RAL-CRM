@@ -6,7 +6,9 @@ export const getFollowUps = async (req, res) => {
     if (req.user.role === 'telecaller' || req.user.role === 'counselor') {
       query.assignedTo = req.user._id;
     }
-    const followUps = await FollowUp.find(query).populate('leadId', 'name phone email interestedCourse');
+    const followUps = await FollowUp.find(query)
+      .populate('leadId', 'name phone email interestedCourse')
+      .populate('assignedTo', 'name role');
     res.json(followUps);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -15,7 +17,11 @@ export const getFollowUps = async (req, res) => {
 
 export const createFollowUp = async (req, res) => {
   try {
-    const fuData = { ...req.body, assignedTo: req.user._id };
+    const canAssignOthers = ['admin', 'owner', 'telecalling_manager'].includes(req.user.role);
+    const fuData = {
+      ...req.body,
+      assignedTo: canAssignOthers && req.body.assignedTo ? req.body.assignedTo : req.user._id,
+    };
     const fu = new FollowUp(fuData);
     const createdFollowUp = await fu.save();
     res.status(201).json(createdFollowUp);

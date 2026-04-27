@@ -37,12 +37,12 @@ function TelecallerDashboard() {
   const followUps = store.getFollowUps();
   const today = new Date().toISOString().split("T")[0];
 
-  const myLeads = leads.filter((l) => l.assignedTelecallerId === currentUser!.id);
+  const myLeads = leads.filter((l) => l.assignedTelecallerId === currentUser?.id);
   const activeLeads = myLeads.filter((l) => l.status !== "Admission" && l.status !== "Lost");
-  const myLogs = callLogs.filter((cl) => cl.telecallerId === currentUser!.id);
+  const myLogs = callLogs.filter((cl) => cl.telecallerId === currentUser?.id);
   const todayLogs = myLogs.filter((cl) => cl.createdAt === today);
   const connected = todayLogs.filter((cl) => cl.outcome === "Connected" || cl.outcome === "Interested").length;
-  const myFollowUps = followUps.filter((f) => f.assignedTo === currentUser!.id && !f.completed && f.date <= today);
+  const myFollowUps = followUps.filter((f) => f.assignedTo === currentUser?.id && !f.completed && f.date <= today);
   const highPriority = activeLeads.filter((l) => l.priorityCategory === "High Priority");
   const newLeads = activeLeads.filter((l) => daysBetween(l.createdAt, today) <= 1);
   const callbackLeads = activeLeads.filter((l) => l.leadSourceFormType === "Free Callback");
@@ -56,7 +56,7 @@ function TelecallerDashboard() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Telecaller Dashboard</h1>
-        <p className="text-sm text-muted-foreground">Welcome, {currentUser!.name}</p>
+        <p className="text-sm text-muted-foreground">Welcome, {currentUser?.name || "User"}</p>
       </div>
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-5">
         <StatCard title="New Leads" value={newLeads.length} icon={<UserPlus className="h-5 w-5" />} />
@@ -125,7 +125,7 @@ function CounselorDashboard() {
   const followUps = store.getFollowUps();
   const today = new Date().toISOString().split("T")[0];
 
-  const myLeads = leads.filter((l) => l.assignedCounselor === currentUser!.id);
+  const myLeads = leads.filter((l) => l.assignedCounselor === currentUser?.id);
   const pendingCounseling = myLeads.filter((l) => l.status === "Counseling");
   const hotLeads = leads.filter((l) => l.intentCategory === "High Intent" && l.qualification?.budgetConfirmed && l.status !== "Admission" && l.status !== "Lost");
   const admissionsToday = admissions.filter((a) => a.admissionDate === today);
@@ -148,7 +148,7 @@ function CounselorDashboard() {
   const walkInConvRate = walkInsCompleted.length > 0 ? ((walkInAdmissions.length / walkInsCompleted.length) * 100).toFixed(1) : "0";
 
   // Follow-up KPIs
-  const myFollowUps = followUps.filter((f) => f.assignedTo === currentUser!.id);
+  const myFollowUps = followUps.filter((f) => f.assignedTo === currentUser?.id);
   const overdueFU = myFollowUps.filter((f) => !f.completed && f.date < today);
 
   return (
@@ -328,10 +328,10 @@ function MarketingDashboard() {
    TELECALLING MANAGER DASHBOARD
    ═══════════════════════════════════════════════════════════════ */
 function TelecallingManagerDashboard() {
+  const { allUsers: users } = useAuth();
   const leads = store.getLeads();
   const callLogs = store.getCallLogs();
   const admissions = store.getAdmissions();
-  const users = store.getUsers();
   const today = new Date().toISOString().split("T")[0];
 
   const telecallers = users.filter((u) => u.role === "telecaller");
@@ -445,12 +445,12 @@ function downloadCSV(filename: string, headers: string[], rows: string[][]) {
 }
 
 function OwnerDashboard() {
+  const { allUsers: users } = useAuth();
   const campaigns = store.getCampaigns();
   const leads = store.getLeads();
   const admissions = store.getAdmissions();
   const callLogs = store.getCallLogs();
   const followUps = store.getFollowUps();
-  const users = store.getUsers();
   const courses = store.getCourses();
   const today = new Date().toISOString().split("T")[0];
 
