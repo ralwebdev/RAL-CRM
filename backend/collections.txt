@@ -1,0 +1,14 @@
+schoolstudents
+calllogs
+internshipadmissions
+admissions
+campaigns
+collegestudents
+schoolprograms
+collegeprograms
+leads
+followups
+courses
+users
+collegeaccounts
+schoolaccounts
