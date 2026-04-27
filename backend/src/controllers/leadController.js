@@ -7,7 +7,12 @@ export const getLeads = async (req, res) => {
     
     if (req.user) {
       if (req.user.role === 'counselor') {
-        query.assignedCounselor = req.user._id;
+        query = {
+          $or: [
+            { assignedCounselor: req.user._id },
+            { walkInCounselor: req.user._id },
+          ],
+        };
       } else if (req.user.role === 'telecaller') {
         query.assignedTelecallerId = req.user._id;
       }

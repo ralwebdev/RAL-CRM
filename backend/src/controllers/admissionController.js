@@ -2,7 +2,11 @@ import Admission from '../models/Admission.js';
 
 export const getAdmissions = async (req, res) => {
   try {
-    const admissions = await Admission.find();
+    let query = {};
+    if (req.user?.role === 'counselor') {
+      query.counselorId = req.user._id;
+    }
+    const admissions = await Admission.find(query);
     res.json(admissions);
   } catch (error) {
     res.status(500).json({ message: error.message });

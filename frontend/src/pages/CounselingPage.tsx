@@ -1,11 +1,16 @@
-import { useState, useMemo } from "react";
-import { store } from "@/lib/mock-data";
-import { Lead, LeadActivity, WalkInStatus, CounselingOutcome, FeeCommitment, DocumentStatus, JoiningFailureReason, FollowUpType } from "@/lib/types";
+import { useEffect, useMemo, useState } from "react";
+import { Lead, LeadActivity, CounselingOutcome, FeeCommitment, DocumentStatus, JoiningFailureReason, FollowUpType, FollowUp, Admission, User as AppUser } from "@/lib/types";
 import {
   MASTER_COUNSELING_OUTCOMES, MASTER_FEE_COMMITMENTS, MASTER_DOCUMENT_STATUS,
   MASTER_JOINING_FAILURE_REASONS, MASTER_COUNSELOR_FOLLOWUP_TYPES, MASTER_COURSE_NAMES,
 } from "@/lib/master-schema";
 import { useAuth } from "@/lib/auth-context";
+import { fetchMarketingAdmissions, fetchMarketingLeads, updateMarketingLead } from "@/lib/marketing-api";
+import {
+  createTelecallingFollowUp,
+  fetchTelecallingFollowUps,
+  fetchTelecallingUsers,
+} from "@/lib/telecalling-api";
 import { StatCard } from "@/components/StatCard";
 import { PiPendingWidget } from "@/components/counseling/PiPendingWidget";
 import { CollectionsWidget } from "@/components/counseling/CollectionsWidget";
@@ -25,7 +30,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Users, GraduationCap, Target, Calendar, DollarSign, AlertTriangle,
   CheckCircle2, Clock, FileText, TrendingUp, User, Star, Zap, Activity,
-  Save, Send, X, ChevronDown, ChevronUp, Bell,
+  Save, Send, X, ChevronDown, ChevronUp, Bell, Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -43,14 +48,47 @@ function daysBetween(a: string, b: string) {
 }
 
 export default function CounselingPage() {
-  const { currentUser, allUsers: users } = useAuth();
-  const [leads, setLeads] = useState<Lead[]>(store.getLeads());
-  const [followUps, setFollowUps] = useState(store.getFollowUps());
-  const admissions = store.getAdmissions();
+  const { currentUser, allUsers: authUsers } = useAuth();
+  const [users, setUsers] = useState<AppUser[]>(authUsers);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [followUps, setFollowUps] = useState<FollowUp[]>([]);
+  const [admissions, setAdmissions] = useState<Admission[]>([]);
+  const [loading, setLoading] = useState(true);
   const today = new Date().toISOString().split("T")[0];
 
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [activeTab, setActiveTab] = useState("walkins");
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const [leadRows, followUpRows, admissionRows, userRows] = await Promise.all([
+          fetchMarketingLeads(),
+          fetchTelecallingFollowUps(),
+          fetchMarketingAdmissions(),
+          fetchTelecallingUsers(),
+        ]);
+        if (!active) return;
+        setLeads(leadRows);
+        setFollowUps(followUpRows);
+        setAdmissions(admissionRows);
+        setUsers(userRows.length > 0 ? userRows : authUsers);
+      } catch (err: any) {
+        if (!active) return;
+        setUsers(authUsers);
+        toast.error(err?.response?.data?.message || "Could not load counseling data from backend.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    void load();
+    return () => {
+      active = false;
+    };
+  }, [authUsers]);
 
   // Filter counselor's leads
   const counselorId = currentUser?.id || users.find(u => u.role === 'counselor')?.id || users[0]?.id;
@@ -116,22 +154,39 @@ export default function CounselingPage() {
     return Array.from(m.entries()).map(([name, value]) => ({ name, value }));
   }, [myLeads]);
 
-  const updateLead = (updated: Lead) => {
-    const all = leads.map((l) => l.id === updated.id ? updated : l);
-    setLeads(all);
-    store.saveLeads(all);
+  const updateLead = async (updated: Lead) => {
+    const saved = await updateMarketingLead(updated.id, updated);
+    setLeads((prev) => prev.map((l) => l.id === saved.id ? saved : l));
+    setSelectedLead((prev) => (prev?.id === saved.id ? saved : prev));
+    return saved;
   };
 
-  const addFollowUp = (leadId: string, date: string, type: string, notes: string) => {
-    const fu = {
-      id: `f${Date.now()}`, leadId, assignedTo: counselorId,
-      date, notes, completed: false, createdAt: today,
+  const addFollowUp = async (leadId: string, date: string, type: string, notes: string) => {
+    const created = await createTelecallingFollowUp({
+      leadId,
+      assignedTo: counselorId,
+      date,
+      notes,
+      completed: false,
+      createdAt: today,
       followUpType: type as FollowUpType || undefined,
-    };
-    const updated = [...followUps, fu];
-    setFollowUps(updated);
-    store.saveFollowUps(updated);
+    });
+    setFollowUps((prev) => [...prev, created]);
+    return created;
   };
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="rounded-xl bg-card p-8 shadow-card">
+          <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading counseling data...
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -271,7 +326,7 @@ export default function CounselingPage() {
             {/* Right panel: Lead detail / counseling form */}
             <div className="lg:col-span-2">
               {selectedLead ? (
-                <CounselingWorkspace lead={selectedLead} users={users} onUpdate={(l) => { updateLead(l); setSelectedLead(l); }} onAddFollowUp={addFollowUp} />
+                <CounselingWorkspace lead={selectedLead} users={users} onUpdate={updateLead} onAddFollowUp={addFollowUp} />
               ) : (
                 <div className="rounded-xl bg-card p-8 text-center shadow-card">
                   <User className="mx-auto h-10 w-10 text-muted-foreground mb-3" />
@@ -307,7 +362,7 @@ export default function CounselingPage() {
             </div>
             <div className="lg:col-span-2">
               {selectedLead ? (
-                <CounselingWorkspace lead={selectedLead} users={users} onUpdate={(l) => { updateLead(l); setSelectedLead(l); }} onAddFollowUp={addFollowUp} />
+                <CounselingWorkspace lead={selectedLead} users={users} onUpdate={updateLead} onAddFollowUp={addFollowUp} />
               ) : (
                 <div className="rounded-xl bg-card p-8 text-center shadow-card">
                   <User className="mx-auto h-10 w-10 text-muted-foreground mb-3" />
@@ -490,9 +545,9 @@ export default function CounselingPage() {
    COUNSELING WORKSPACE — Detail panel for a single lead
    ═══════════════════════════════════════════════════════════════ */
 function CounselingWorkspace({ lead, users, onUpdate, onAddFollowUp }: {
-  lead: Lead; users: ReturnType<typeof store.getUsers>;
-  onUpdate: (l: Lead) => void;
-  onAddFollowUp: (leadId: string, date: string, type: string, notes: string) => void;
+  lead: Lead; users: AppUser[];
+  onUpdate: (l: Lead) => Promise<Lead>;
+  onAddFollowUp: (leadId: string, date: string, type: string, notes: string) => Promise<FollowUp>;
 }) {
   const today = new Date().toISOString().split("T")[0];
   const [showOutcome, setShowOutcome] = useState(false);
@@ -514,7 +569,7 @@ function CounselingWorkspace({ lead, users, onUpdate, onAddFollowUp }: {
   const [fuNotes, setFuNotes] = useState("");
   const [failureReason, setFailureReason] = useState<JoiningFailureReason | "">(lead.joiningFailureReason || "");
 
-  const markWalkInCompleted = () => {
+  const markWalkInCompleted = async () => {
     const now = new Date();
     const activities: LeadActivity[] = [...(lead.activities || []), {
       id: `act${Date.now()}`, leadId: lead.id, type: "Walk-in Completed",
@@ -525,86 +580,114 @@ function CounselingWorkspace({ lead, users, onUpdate, onAddFollowUp }: {
       description: `Lead ownership transferred to counselor ${users.find((u) => u.id === (lead.walkInCounselor || lead.assignedCounselor))?.name || ""}`,
       timestamp: new Date(now.getTime() + 1000).toISOString(),
     }];
-    onUpdate({
-      ...lead, walkInStatus: "Completed", status: "Counseling",
-      leadOwner: lead.walkInCounselor || lead.assignedCounselor,
-      activities,
-    });
-    toast.success("Walk-in marked as completed. Ownership transferred to counselor.");
+    try {
+      await onUpdate({
+        ...lead, walkInStatus: "Completed", status: "Counseling",
+        leadOwner: lead.walkInCounselor || lead.assignedCounselor,
+        activities,
+      });
+      toast.success("Walk-in marked as completed. Ownership transferred to counselor.");
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to mark walk-in as completed.");
+    }
   };
 
-  const markNoShow = () => {
+  const markNoShow = async () => {
     const activities: LeadActivity[] = [...(lead.activities || []), {
       id: `act${Date.now()}`, leadId: lead.id, type: "Walk-in No Show",
       description: "Student did not show up for scheduled walk-in",
       timestamp: new Date().toISOString(),
     }];
-    onUpdate({ ...lead, walkInStatus: "No Show", activities });
-    toast.info("Walk-in marked as No Show.");
+    try {
+      await onUpdate({ ...lead, walkInStatus: "No Show", activities });
+      toast.info("Walk-in marked as No Show.");
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to mark walk-in as no show.");
+    }
   };
 
-  const saveCounselingOutcome = () => {
+  const saveCounselingOutcome = async () => {
     if (!counselingOutcome) return;
     const activities: LeadActivity[] = [...(lead.activities || []), {
       id: `act${Date.now()}`, leadId: lead.id, type: "Counseling Outcome",
       description: `Counseling outcome: ${counselingOutcome}`,
       timestamp: new Date().toISOString(),
     }];
-    onUpdate({ ...lead, counselingOutcome, activities });
-    toast.success("Counseling outcome saved.");
+    try {
+      await onUpdate({ ...lead, counselingOutcome, activities });
+      toast.success("Counseling outcome saved.");
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to save counseling outcome.");
+    }
   };
 
-  const saveDOJ = () => {
+  const saveDOJ = async () => {
     if (!expectedDOJ || !feeCommitment) return;
     const activities: LeadActivity[] = [...(lead.activities || []), {
       id: `act${Date.now()}`, leadId: lead.id, type: "DoJ Set",
       description: `Expected joining date: ${expectedDOJ} · Fee: ${feeCommitment}`,
       timestamp: new Date().toISOString(),
     }];
-    onUpdate({
-      ...lead, expectedDOJ, feeCommitment, interestedCourse: courseSelected || lead.interestedCourse,
-      totalEmisPlanned: feeCommitment === "EMI Plan" ? parseInt(totalEmis) || undefined : undefined,
-      firstEmiDate: feeCommitment === "EMI Plan" ? firstEmiDate : undefined,
-      activities,
-    });
-    toast.success("Date of Joining and fee commitment saved.");
+    try {
+      await onUpdate({
+        ...lead, expectedDOJ, feeCommitment, interestedCourse: courseSelected || lead.interestedCourse,
+        totalEmisPlanned: feeCommitment === "EMI Plan" ? parseInt(totalEmis) || undefined : undefined,
+        firstEmiDate: feeCommitment === "EMI Plan" ? firstEmiDate : undefined,
+        activities,
+      });
+      toast.success("Date of Joining and fee commitment saved.");
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to save joining plan.");
+    }
   };
 
-  const saveDocs = () => {
+  const saveDocs = async () => {
     const activities: LeadActivity[] = [...(lead.activities || []), {
       id: `act${Date.now()}`, leadId: lead.id, type: "Document Update",
       description: `Document status: ${documentStatus}`,
       timestamp: new Date().toISOString(),
     }];
-    onUpdate({ ...lead, documentStatus: documentStatus as DocumentStatus, documentsChecklist: docsChecklist, activities });
-    toast.success("Document status updated.");
+    try {
+      await onUpdate({ ...lead, documentStatus: documentStatus as DocumentStatus, documentsChecklist: docsChecklist, activities });
+      toast.success("Document status updated.");
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to update document status.");
+    }
   };
 
-  const scheduleFollowUp = () => {
+  const scheduleFollowUp = async () => {
     if (!fuDate) return;
-    onAddFollowUp(lead.id, fuDate, fuType, fuNotes);
     const activities: LeadActivity[] = [...(lead.activities || []), {
       id: `act${Date.now()}`, leadId: lead.id, type: "Follow-up Scheduled",
       description: `Counselor follow-up: ${fuType || "Call"} on ${fuDate}`,
       timestamp: new Date().toISOString(),
     }];
-    onUpdate({ ...lead, activities });
-    setFuDate(""); setFuType(""); setFuNotes("");
-    toast.success("Follow-up scheduled.");
+    try {
+      await onAddFollowUp(lead.id, fuDate, fuType, fuNotes);
+      await onUpdate({ ...lead, activities });
+      setFuDate(""); setFuType(""); setFuNotes("");
+      toast.success("Follow-up scheduled.");
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to schedule follow-up.");
+    }
   };
 
-  const saveFailureReason = () => {
+  const saveFailureReason = async () => {
     if (!failureReason) return;
     const activities: LeadActivity[] = [...(lead.activities || []), {
       id: `act${Date.now()}`, leadId: lead.id, type: "Joining Failed",
       description: `Joining failure: ${failureReason}`,
       timestamp: new Date().toISOString(),
     }];
-    onUpdate({ ...lead, joiningFailureReason: failureReason, joiningDelayed: true, activities });
-    if (failureReason === "Follow-Up Missed") {
-      toast.warning("Alert: Follow-up missed flagged for performance review.");
-    } else {
-      toast.success("Joining failure reason recorded.");
+    try {
+      await onUpdate({ ...lead, joiningFailureReason: failureReason, joiningDelayed: true, activities });
+      if (failureReason === "Follow-Up Missed") {
+        toast.warning("Alert: Follow-up missed flagged for performance review.");
+      } else {
+        toast.success("Joining failure reason recorded.");
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to record joining failure reason.");
     }
   };
 
