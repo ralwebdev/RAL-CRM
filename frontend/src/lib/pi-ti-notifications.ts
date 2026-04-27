@@ -6,6 +6,7 @@
 import { toast } from "sonner";
 import type { Invoice } from "./finance-types";
 import { fmtINR } from "@/components/finance/FinanceKpi";
+import { db } from "./db";
 
 export type PiTiEvent =
   | "PI_due_today"
@@ -32,13 +33,12 @@ type Listener = () => void;
 const listeners = new Set<Listener>();
 
 function load(): NotifEntry[] {
-  try { const raw = localStorage.getItem(KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
+  return db.readSync<NotifEntry[]>(KEY, []) ?? [];
 }
 let state: NotifEntry[] = typeof window !== "undefined" ? load() : [];
 
 function save() {
-  try { localStorage.setItem(KEY, JSON.stringify(state.slice(0, 200))); } catch {}
+  db.createSync(KEY, state.slice(0, 200));
   listeners.forEach(l => l());
 }
 

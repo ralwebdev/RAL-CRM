@@ -10,6 +10,7 @@
  *
  * EMI late-fee engine: ₹50 / day overdue, accrued on read (no schedule mutation).
  */
+import { db } from "./db";
 
 export type CollectionMode = "cash" | "upi" | "bank_transfer" | "cheque" | "card";
 
@@ -181,11 +182,7 @@ const listeners = new Set<Listener>();
 const uid = (p: string) => `${p}_${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-4)}`;
 
 function load(): Collection[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return seed();
+  return db.readSync<Collection[]>(KEY, seed()) ?? seed();
 }
 
 function seed(): Collection[] {
@@ -196,7 +193,7 @@ let state: Collection[] = typeof window !== "undefined" ? load() : [];
 
 function save(next: Collection[]) {
   state = next;
-  try { localStorage.setItem(KEY, JSON.stringify(next)); } catch {}
+  db.createSync(KEY, next);
   listeners.forEach(l => l());
 }
 

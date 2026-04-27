@@ -5,6 +5,7 @@
  *   regenerate on demand. Folder paths (year/month/type/recipient) are computed.
  * - Audit logs every action (generate, send, fail, resend).
  */
+import { db } from "./db";
 
 export type InvoiceDocType =
   | "proforma_invoice"
@@ -73,18 +74,14 @@ const uid = (p: string) =>
 const nowIso = () => new Date().toISOString();
 
 function load(): State {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) return JSON.parse(raw);
-  } catch { /* ignore */ }
-  return { items: [] };
+  return db.readSync<State>(KEY, { items: [] }) ?? { items: [] };
 }
 
 let state: State = typeof window !== "undefined" ? load() : { items: [] };
 
 function save(s: State) {
   state = s;
-  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* ignore */ }
+  db.createSync(KEY, s);
   listeners.forEach(l => l());
 }
 

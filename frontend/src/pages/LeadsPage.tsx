@@ -1,15 +1,16 @@
 import { useState, useMemo, useEffect } from "react";
-import { store } from "@/lib/mock-data";
 import {
   Lead, LeadStatus, LeadQuality, LeadTemperature, LeadIntentCategory,
   DecisionMaker, FeePayer, LostReason, TransferReason, CommunicationChannel,
-  LeadActivity, QualificationChecklist, CurrentStatus, CareerGoal, LeadMotivation, PreferredStartTime,
+  LeadActivity, QualificationChecklist, CurrentStatus, CareerGoal, LeadMotivation, PreferredStartTime, Campaign, User,
 } from "@/lib/types";
 import {
   MASTER_LEAD_SOURCES, MASTER_QUALIFICATIONS, MASTER_CURRENT_STATUS,
   MASTER_CAREER_GOALS, MASTER_LEAD_MOTIVATIONS, MASTER_COURSE_NAMES,
   MASTER_SALARY_EXPECTATIONS, MASTER_LOCATIONS, MASTER_LEAD_PIPELINE_STAGES,
 } from "@/lib/master-schema";
+import { useAuth } from "@/lib/auth-context";
+import { createMarketingLead, fetchMarketingCampaigns, fetchMarketingLeads, updateMarketingLead } from "@/lib/marketing-api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { StatCard } from "@/components/StatCard";
 import { Button } from "@/components/ui/button";
@@ -135,7 +136,7 @@ function QualChecklist({ qual, onChange }: { qual?: QualificationChecklist; onCh
 // ─── Lead Detail Panel ───
 function LeadDetailPanel({
   lead, users, onUpdate, onClose,
-}: { lead: Lead; users: ReturnType<typeof store.getUsers>; onUpdate: (l: Lead) => void; onClose: () => void }) {
+}: { lead: Lead; users: User[]; onUpdate: (l: Lead) => void | Promise<void>; onClose: () => void }) {
   const [activeTab, setActiveTab] = useState("overview");
   const [lostReason, setLostReason] = useState<LostReason | "">(lead.lostReason || "");
   const [lostError, setLostError] = useState("");
@@ -148,7 +149,7 @@ function LeadDetailPanel({
   const counselors = users.filter((u) => u.role === "counselor");
   const telecallers = users.filter((u) => u.role === "telecaller");
 
-  const handleStatusChange = (status: LeadStatus) => {
+  const handleStatusChange = async (status: LeadStatus) => {
     if (status === "Lost" && !lostReason) {
       setLostError("Please select a reason for marking this lead as lost.");
       return;
@@ -158,15 +159,15 @@ function LeadDetailPanel({
       description: `Status changed to ${status}${status === "Lost" && lostReason ? ` (${lostReason})` : ""}`,
       timestamp: new Date().toISOString(),
     };
-    onUpdate({
+    await Promise.resolve(onUpdate({
       ...lead, status,
       lostReason: status === "Lost" ? lostReason as LostReason : lead.lostReason,
       activities: [...(lead.activities || []), activity],
-    });
+    }));
     toast.success("Lead updated successfully.");
   };
 
-  const handleTransfer = () => {
+  const handleTransfer = async () => {
     if (!transferTo || !transferReason) return;
     const fromName = users.find((u) => u.id === (lead.assignedCounselor || lead.assignedTelecallerId))?.name || "Unknown";
     const toName = users.find((u) => u.id === transferTo)?.name || "Unknown";
@@ -176,32 +177,32 @@ function LeadDetailPanel({
       description: `Transferred from ${fromName} to ${toName} — ${transferReason}`,
       timestamp: new Date().toISOString(),
     };
-    onUpdate({
+    await Promise.resolve(onUpdate({
       ...lead, assignedCounselor: transferTo,
       transferHistory: [...(lead.transferHistory || []), transfer],
       activities: [...(lead.activities || []), activity],
-    });
+    }));
     setTransferTo("");
     setTransferReason("");
     toast.success("Lead transferred successfully.");
   };
 
-  const handleLogComm = () => {
+  const handleLogComm = async () => {
     if (!commChannel || !commSummary.trim()) return;
     const activity: LeadActivity = {
       id: `act${Date.now()}`, leadId: lead.id, type: "Communication",
       description: commSummary, channel: commChannel as CommunicationChannel,
       userId: lead.assignedTelecallerId, timestamp: new Date().toISOString(),
     };
-    onUpdate({ ...lead, activities: [...(lead.activities || []), activity], lastInteractionType: commChannel, lastInteractionDate: new Date().toISOString().split("T")[0] });
+    await Promise.resolve(onUpdate({ ...lead, activities: [...(lead.activities || []), activity], lastInteractionType: commChannel, lastInteractionDate: new Date().toISOString().split("T")[0] }));
     setCommChannel("");
     setCommSummary("");
     toast.success("Communication logged.");
   };
 
-  const handleQualUpdate = (q: QualificationChecklist) => {
+  const handleQualUpdate = async (q: QualificationChecklist) => {
     const score = Object.values(q).filter(Boolean).length * 20;
-    onUpdate({ ...lead, qualification: q, qualificationScore: score });
+    await Promise.resolve(onUpdate({ ...lead, qualification: q, qualificationScore: score }));
   };
 
   return (
@@ -384,10 +385,22 @@ function LeadDetailPanel({
 }
 
 // ─── Lead Creation Form (with role-based behavior) ───
-function LeadCreateForm({ onSave, onCancel, userRole }: { onSave: (lead: Lead) => void; onCancel?: () => void; userRole?: string }) {
-  const users = store.getUsers();
+function LeadCreateForm({
+  onSave,
+  onCancel,
+  userRole,
+  users,
+  campaigns,
+  existingLeads,
+}: {
+  onSave: (lead: Lead) => void | Promise<void>;
+  onCancel?: () => void;
+  userRole?: string;
+  users: User[];
+  campaigns: Campaign[];
+  existingLeads: Lead[];
+}) {
   const telecallers = users.filter((u) => u.role === "telecaller");
-  const campaigns = store.getCampaigns();
 
   const isMarketing = userRole === "marketing_manager";
 
@@ -418,19 +431,18 @@ function LeadCreateForm({ onSave, onCancel, userRole }: { onSave: (lead: Lead) =
 
   const buildLead = (): Lead => {
     // Duplicate detection
-    const existing = store.getLeads();
-    const dup = existing.find((l) => l.phone === form.phone || (form.email && l.email === form.email));
+    const dup = existingLeads.find((l) => l.phone === form.phone || (form.email && l.email === form.email));
     if (dup) {
       toast.error(`Possible duplicate lead detected: ${dup.name} (${dup.phone})`);
       throw new Error("duplicate");
     }
 
-    // Round-robin if no telecaller selected
+      // Round-robin if no telecaller selected
     let assignedTc = form.assignedTelecallerId;
     if (!assignedTc && telecallers.length > 0) {
       const counts = new Map<string, number>();
       telecallers.forEach((tc) => counts.set(tc.id, 0));
-      existing.forEach((l) => {
+      existingLeads.forEach((l) => {
         if (l.assignedTelecallerId && counts.has(l.assignedTelecallerId))
           counts.set(l.assignedTelecallerId, (counts.get(l.assignedTelecallerId) || 0) + 1);
       });
@@ -468,23 +480,23 @@ function LeadCreateForm({ onSave, onCancel, userRole }: { onSave: (lead: Lead) =
     };
   };
 
-  const handleSaveDraft = () => {
+  const handleSaveDraft = async () => {
     if (!form.name.trim() && !form.phone.trim()) {
       toast.error("Enter at least a name or phone number.");
       return;
     }
     try {
       const lead = buildLead();
-      onSave(lead);
+      await Promise.resolve(onSave(lead));
       toast.success("Lead saved as draft.");
     } catch { /* duplicate */ }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validate()) return;
     try {
       const lead = buildLead();
-      onSave(lead);
+      await Promise.resolve(onSave(lead));
       toast.success("Lead successfully created and assigned for telecalling.");
     } catch { /* duplicate */ }
   };
@@ -656,14 +668,39 @@ function LeadCreateForm({ onSave, onCancel, userRole }: { onSave: (lead: Lead) =
 
 // ─── Main Page ───
 export default function LeadsPage() {
-  const [leads, setLeads] = useState<Lead[]>(store.getLeads());
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [view, setView] = useState<"dashboard" | "pipeline" | "table">("dashboard");
+  const { currentUser, allUsers } = useAuth();
+  const users = allUsers;
 
-  const users = store.getUsers();
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const [leadRows, campaignRows] = await Promise.all([
+          fetchMarketingLeads(),
+          fetchMarketingCampaigns(),
+        ]);
+        if (!active) return;
+        setLeads(leadRows);
+        setCampaigns(campaignRows);
+      } catch (err: any) {
+        if (!active) return;
+        toast.error(err?.response?.data?.message || "Could not load leads from backend.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    void load();
+    return () => { active = false; };
+  }, []);
 
   const filtered = useMemo(() => {
     return leads.filter((l) => {
@@ -697,21 +734,29 @@ export default function LeadsPage() {
   // Pipeline chart
   const pipelineData = STATUSES.map((s) => ({ name: s, count: leads.filter((l) => l.status === s).length }));
 
-  const handleCreateLead = (lead: Lead) => {
-    const updated = [...leads, lead];
-    setLeads(updated);
-    store.saveLeads(updated);
-    setCreateOpen(false);
+  const handleCreateLead = async (lead: Lead) => {
+    try {
+      const created = await createMarketingLead(lead);
+      setLeads((prev) => [...prev, created]);
+      setCreateOpen(false);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to create lead.");
+      throw err;
+    }
   };
 
-  const handleUpdateLead = (updated: Lead) => {
-    const all = leads.map((l) => l.id === updated.id ? updated : l);
-    setLeads(all);
-    store.saveLeads(all);
-    setSelectedLead(updated);
+  const handleUpdateLead = async (updated: Lead) => {
+    try {
+      const saved = await updateMarketingLead(updated.id, updated);
+      setLeads((prev) => prev.map((l) => l.id === saved.id ? saved : l));
+      setSelectedLead(saved);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to update lead.");
+      throw err;
+    }
   };
 
-  const handleKanbanStatusChange = (leadId: string, newStatus: LeadStatus) => {
+  const handleKanbanStatusChange = async (leadId: string, newStatus: LeadStatus) => {
     const lead = leads.find((l) => l.id === leadId);
     if (!lead) return;
     const activity = {
@@ -723,10 +768,13 @@ export default function LeadsPage() {
       ...lead, status: newStatus,
       activities: [...(lead.activities || []), activity],
     };
-    const all = leads.map((l) => l.id === leadId ? updated : l);
-    setLeads(all);
-    store.saveLeads(all);
-    toast.success(`${lead.name} moved to ${newStatus}`);
+    try {
+      const saved = await updateMarketingLead(leadId, updated);
+      setLeads((prev) => prev.map((l) => l.id === leadId ? saved : l));
+      toast.success(`${lead.name} moved to ${newStatus}`);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to update lead status.");
+    }
   };
 
   return (
@@ -736,6 +784,7 @@ export default function LeadsPage() {
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-foreground">Leads</h1>
           <p className="text-xs sm:text-sm text-muted-foreground">{leads.length} total leads in pipeline</p>
+          {loading && <p className="text-[11px] text-muted-foreground mt-1">Loading from backend...</p>}
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant={view === "dashboard" ? "default" : "outline"} size="sm" onClick={() => setView("dashboard")}>
@@ -753,7 +802,13 @@ export default function LeadsPage() {
             </DialogTrigger>
             <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
               <DialogHeader><DialogTitle>Add New Lead</DialogTitle></DialogHeader>
-              <LeadCreateForm onSave={handleCreateLead} />
+              <LeadCreateForm
+                onSave={handleCreateLead}
+                userRole={currentUser?.role}
+                users={users}
+                campaigns={campaigns}
+                existingLeads={leads}
+              />
             </DialogContent>
           </Dialog>
         </div>

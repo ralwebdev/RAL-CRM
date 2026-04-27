@@ -182,6 +182,8 @@ function DashboardTab({ onJump }: { onJump: (id: string) => void }) {
   const riskRows = computeStudentRisk(fin.invoices, fin.emiSchedules);
   const riskAtStake = riskRows.filter(r => r.riskLevel !== "low").reduce((s, r) => s + r.balanceDue, 0);
   const totalBilled = fin.invoices.reduce((s, i) => s + i.total, 0);
+  const piInvoices = fin.invoices.filter(i => i.invoiceType === "PI");
+  const billingRaised = piInvoices.reduce((s, i) => s + i.total, 0);
   const totalCollected = fin.payments.reduce((s, p) => s + p.amount, 0);
   const outstanding = fin.invoices.reduce((s, i) => s + (i.total - i.amountPaid), 0);
   const totalExpenses = fin.expenses.filter(e => e.status === "Approved").reduce((s, e) => s + e.total, 0);
@@ -256,7 +258,7 @@ function DashboardTab({ onJump }: { onJump: (id: string) => void }) {
       )}
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <FinanceKpi label="Billing Raised" value={fmtINR(totalBilled)} hint={`${fin.invoices.length} invoices`} tone="primary" icon={<FileText className="h-4 w-4" />} onClick={() => onJump("billing")} />
+        <FinanceKpi label="Billing Raised" value={fmtINR(billingRaised)} hint={`${piInvoices.length} PI invoices`} tone="primary" icon={<FileText className="h-4 w-4" />} onClick={() => onJump("billing")} />
         <FinanceKpi label="Cash Received" value={fmtINR(totalCollected)} hint={`${fin.payments.length} receipts`} tone="success" icon={<IndianRupee className="h-4 w-4" />} onClick={() => onJump("collections")} />
         <FinanceKpi label="Outstanding Dues" value={fmtINR(outstanding)} hint="All open invoices" tone="warning" icon={<AlertTriangle className="h-4 w-4" />} onClick={() => onJump("collections")} />
         <FinanceKpi label="Total Expenses" value={fmtINR(totalExpenses)} hint="Approved this period" tone="destructive" icon={<Receipt className="h-4 w-4" />} onClick={() => onJump("expenses")} />
@@ -265,7 +267,7 @@ function DashboardTab({ onJump }: { onJump: (id: string) => void }) {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <FinanceKpi label="Gross Billing" value={fmtINR(totalBilled)} hint="GST inclusive" tone="primary" icon={<FileText className="h-4 w-4" />} onClick={() => onJump("billing")} />
+        <FinanceKpi label="Gross Billing" value={fmtINR(billingRaised)} hint="PI only · GST inclusive" tone="primary" icon={<FileText className="h-4 w-4" />} onClick={() => onJump("billing")} />
         <FinanceKpi label="Net Revenue" value={fmtINR(totalBilled - gstOutput)} hint="Excl. GST" tone="success" icon={<TrendingUp className="h-4 w-4" />} onClick={() => onJump("revenue")} />
         <FinanceKpi label="GST Collected" value={fmtINR(gstOutput)} hint="Output tax" tone="primary" icon={<BadgePercent className="h-4 w-4" />} onClick={() => onJump("gst")} />
         <FinanceKpi label="Vendor Payables" value={fmtINR(vendorPayables)} tone="warning" onClick={() => onJump("vendors")} />

@@ -2,6 +2,8 @@
  * PI ↔ TI mapping store
  * Tracks conversions between Proforma Invoices and Tax Invoices.
  */
+import { db } from "./db";
+
 export interface PiTiMapping {
   id: string;
   piId: string;
@@ -23,17 +25,13 @@ type Listener = () => void;
 const listeners = new Set<Listener>();
 
 function load(): PiTiMapping[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return [];
+  return db.readSync<PiTiMapping[]>(KEY, []) ?? [];
 }
 
 let state: PiTiMapping[] = typeof window !== "undefined" ? load() : [];
 
 function save() {
-  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
+  db.createSync(KEY, state);
   listeners.forEach(l => l());
 }
 

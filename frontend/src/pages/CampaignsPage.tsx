@@ -1,11 +1,18 @@
 import { useState, useMemo, useRef, useEffect } from "react";
-import { store } from "@/lib/mock-data";
 import {
   Campaign, CampaignPlatform, CampaignObjective, CampaignApprovalStatus,
-  AudienceType, RetargetingSource, AdType, AdSet, AdCreative, LandingPage, UTMTracking, Lead,
+  AudienceType, RetargetingSource, AdType, AdSet, AdCreative, LandingPage, UTMTracking, Lead, Admission,
 } from "@/lib/types";
 import { MASTER_LOCATIONS, MASTER_COURSE_NAMES } from "@/lib/master-schema";
 import { useAuth } from "@/lib/auth-context";
+import {
+  createMarketingCampaign,
+  createMarketingLead,
+  fetchMarketingAdmissions,
+  fetchMarketingCampaigns,
+  fetchMarketingLeads,
+  updateMarketingCampaign,
+} from "@/lib/marketing-api";
 import { MarketingLeadForm } from "@/components/MarketingLeadForm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,7 +48,7 @@ function metricColor(value: number, good: number, avg: number, inverse = false) 
 }
 
 // ─── Campaign Creation Form ───
-function CampaignForm({ onSave, onCancel }: { onSave: (c: Campaign) => void; onCancel: () => void }) {
+function CampaignForm({ onSave, onCancel }: { onSave: (c: Campaign) => void | Promise<void>; onCancel: () => void }) {
   const [form, setForm] = useState({
     name: "", platform: "" as CampaignPlatform | "", objective: "" as CampaignObjective | "",
     budget: "", dailyBudget: "", startDate: "", endDate: "", targetLocation: "",
@@ -66,7 +73,7 @@ function CampaignForm({ onSave, onCancel }: { onSave: (c: Campaign) => void; onC
     return Object.keys(e).length === 0;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validate()) return;
     const campaign: Campaign = {
       id: `c${Date.now()}`,
@@ -80,7 +87,11 @@ function CampaignForm({ onSave, onCancel }: { onSave: (c: Campaign) => void; onC
       campaignNotes: form.campaignNotes, approvalStatus: form.approvalStatus,
       adSets: [], utmTracking: utmForm, landingPages: [],
     };
-    onSave(campaign);
+    try {
+      await Promise.resolve(onSave(campaign));
+    } catch {
+      // parent handles save errors
+    }
   };
 
   const set = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
@@ -276,16 +287,41 @@ function AdSetForm({ campaignId, onSave }: { campaignId: string; onSave: (adSet:
 
 // ─── Main Campaigns Page ───
 export default function CampaignsPage() {
-  const [campaigns, setCampaigns] = useState<Campaign[]>(store.getCampaigns());
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [admissions, setAdmissions] = useState<Admission[]>([]);
+  const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [leadFormOpen, setLeadFormOpen] = useState(false);
   const [adSetDialog, setAdSetDialog] = useState<string | null>(null);
   const [detailCampaign, setDetailCampaign] = useState<Campaign | null>(null);
   const [view, setView] = useState<"dashboard" | "list">("dashboard");
-  const { currentUser } = useAuth();
+  const { currentUser, allUsers } = useAuth();
 
-  const leads = store.getLeads();
-  const admissions = store.getAdmissions();
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const [campaignRows, leadRows, admissionRows] = await Promise.all([
+          fetchMarketingCampaigns(),
+          fetchMarketingLeads(),
+          fetchMarketingAdmissions(),
+        ]);
+        if (!active) return;
+        setCampaigns(campaignRows);
+        setLeads(leadRows);
+        setAdmissions(admissionRows);
+      } catch (err: any) {
+        if (!active) return;
+        toast.error(err?.response?.data?.message || "Could not load marketing data from backend.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    void load();
+    return () => { active = false; };
+  }, []);
 
   // ─── Computed Analytics ───
   const totalSpend = campaigns.reduce((s, c) => s + (c.budget || 0), 0);
@@ -323,27 +359,41 @@ export default function CampaignsPage() {
     budget: (c.budget || 0) / 1000,
   }));
 
-  const handleCreateCampaign = (c: Campaign) => {
-    const updated = [...campaigns, c];
-    setCampaigns(updated);
-    store.saveCampaigns(updated);
-    setCreateOpen(false);
-    toast.success("Campaign created successfully.");
+  const handleCreateCampaign = async (c: Campaign) => {
+    try {
+      const created = await createMarketingCampaign(c);
+      setCampaigns((prev) => [...prev, created]);
+      setCreateOpen(false);
+      toast.success("Campaign created successfully.");
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to create campaign.");
+    }
   };
 
-  const handleAddAdSet = (adSet: AdSet) => {
-    const updated = campaigns.map((c) => c.id === adSet.campaignId ? { ...c, adSets: [...(c.adSets || []), adSet] } : c);
-    setCampaigns(updated);
-    store.saveCampaigns(updated);
-    setAdSetDialog(null);
-    toast.success("Ad Set added successfully.");
+  const handleAddAdSet = async (adSet: AdSet) => {
+    const existing = campaigns.find((c) => c.id === adSet.campaignId);
+    if (!existing) return;
+    try {
+      const updatedCampaign = await updateMarketingCampaign(adSet.campaignId, {
+        adSets: [...(existing.adSets || []), adSet],
+      });
+      setCampaigns((prev) => prev.map((c) => c.id === updatedCampaign.id ? updatedCampaign : c));
+      setAdSetDialog(null);
+      toast.success("Ad Set added successfully.");
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to save ad set.");
+    }
   };
 
-  const handleCreateLead = (lead: Lead) => {
-    const existing = store.getLeads();
-    const updated = [...existing, lead];
-    store.saveLeads(updated);
-    setLeadFormOpen(false);
+  const handleCreateLead = async (lead: Lead) => {
+    try {
+      const created = await createMarketingLead(lead);
+      setLeads((prev) => [...prev, created]);
+      setLeadFormOpen(false);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to create lead.");
+      throw err;
+    }
   };
 
   return (
@@ -353,6 +403,7 @@ export default function CampaignsPage() {
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-foreground">Campaigns</h1>
           <p className="text-xs sm:text-sm text-muted-foreground">Track campaign performance, lead attribution, and ROI</p>
+          {loading && <p className="text-[11px] text-muted-foreground mt-1">Loading from backend...</p>}
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant={view === "dashboard" ? "default" : "outline"} size="sm" onClick={() => setView("dashboard")}>
@@ -367,7 +418,14 @@ export default function CampaignsPage() {
             </DialogTrigger>
             <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
               <DialogHeader><DialogTitle>Quick Lead Capture</DialogTitle></DialogHeader>
-              <MarketingLeadForm onSave={handleCreateLead} onCancel={() => setLeadFormOpen(false)} creatorName={currentUser?.name || "Marketing"} />
+              <MarketingLeadForm
+                onSave={handleCreateLead}
+                onCancel={() => setLeadFormOpen(false)}
+                creatorName={currentUser?.name || "Marketing"}
+                campaigns={campaigns}
+                users={allUsers}
+                existingLeads={leads}
+              />
             </DialogContent>
           </Dialog>
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>

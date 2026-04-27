@@ -9,6 +9,7 @@
  * invoice-dispatch-store.ts (which we mark "superseded" on edit).
  */
 import type { Invoice } from "./finance-types";
+import { db } from "./db";
 
 export type InvoiceEditAction = "edit" | "cancel" | "clone" | "convert_pi_to_ti" | "regenerate";
 
@@ -43,18 +44,14 @@ const uid = (p: string) =>
 const nowIso = () => new Date().toISOString();
 
 function load(): State {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) return JSON.parse(raw);
-  } catch { /* ignore */ }
-  return { entries: [] };
+  return db.readSync<State>(KEY, { entries: [] }) ?? { entries: [] };
 }
 
 let state: State = typeof window !== "undefined" ? load() : { entries: [] };
 
 function save(s: State) {
   state = s;
-  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* ignore */ }
+  db.createSync(KEY, s);
   listeners.forEach(l => l());
 }
 

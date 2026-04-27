@@ -1,9 +1,8 @@
 import { createContext, useContext, useMemo, useState, useCallback, type ReactNode } from "react";
 import { AuthLoginResponse, User } from "./types";
-import { api, TOKEN_STORAGE_KEY } from "./api";
+import { api } from "./api";
+import { session } from "./session";
 export { roleNavConfig, roleLabels } from "./role-config";
-
-const USER_STORAGE_KEY = "crm_current_user";
 
 const initialUsers: User[] = [
   { id: "u1", name: "Amit Sharma", email: "amit@redapple.com", role: "admin" },
@@ -40,34 +39,16 @@ const normalizeUser = (payload: AuthLoginResponse): User => ({
   role: payload.role,
 });
 
-const readStoredUser = (): User | null => {
-  try {
-    const stored = localStorage.getItem(USER_STORAGE_KEY);
-    if (!stored) return null;
-    return JSON.parse(stored) as User;
-  } catch {
-    return null;
-  }
-};
-
-const readStoredToken = (): string | null => {
-  try {
-    return localStorage.getItem(TOKEN_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-};
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [currentUser, setCurrentUser] = useState<User | null>(() => readStoredUser());
-  const [token, setToken] = useState<string | null>(() => readStoredToken());
+  const [currentUser, setCurrentUser] = useState<User | null>(() => session.getUser());
+  const [token, setToken] = useState<string | null>(() => session.getToken());
 
   const completeLogin = useCallback((response: AuthLoginResponse) => {
     const normalized = normalizeUser(response);
     setCurrentUser(normalized);
     setToken(response.token);
-    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(normalized));
-    localStorage.setItem(TOKEN_STORAGE_KEY, response.token);
+    session.setUser(normalized);
+    session.setToken(response.token);
   }, []);
 
   const loginByCredentials = useCallback(async (email: string, password: string) => {
@@ -86,8 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     setCurrentUser(null);
     setToken(null);
-    localStorage.removeItem(USER_STORAGE_KEY);
-    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    session.clearSession();
   }, []);
 
   const allUsers = useMemo(() => {
@@ -108,4 +88,3 @@ export function useAuth() {
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
 }
-

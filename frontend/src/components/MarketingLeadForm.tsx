@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { store } from "@/lib/mock-data";
-import { Lead, LeadActivity } from "@/lib/types";
+import { Campaign, Lead, LeadActivity, User } from "@/lib/types";
 import {
   MASTER_LEAD_SOURCES, MASTER_COURSE_NAMES, MASTER_LOCATIONS,
 } from "@/lib/master-schema";
@@ -31,9 +31,7 @@ function FieldError({ msg }: { msg?: string }) {
 /**
  * Round-robin assignment: picks the telecaller with the fewest assigned leads.
  */
-function getNextTelecaller(): string {
-  const users = store.getUsers();
-  const leads = store.getLeads();
+function getNextTelecaller(users: User[], leads: Lead[]): string {
   const telecallers = users.filter((u) => u.role === "telecaller");
   if (telecallers.length === 0) return "";
 
@@ -54,13 +52,25 @@ function getNextTelecaller(): string {
 }
 
 interface MarketingLeadFormProps {
-  onSave: (lead: Lead) => void;
+  onSave: (lead: Lead) => void | Promise<void>;
   onCancel: () => void;
   creatorName?: string;
+  campaigns?: Campaign[];
+  users?: User[];
+  existingLeads?: Lead[];
 }
 
-export function MarketingLeadForm({ onSave, onCancel, creatorName = "Marketing" }: MarketingLeadFormProps) {
-  const campaigns = store.getCampaigns();
+export function MarketingLeadForm({
+  onSave,
+  onCancel,
+  creatorName = "Marketing",
+  campaigns: campaignsProp,
+  users: usersProp,
+  existingLeads: existingLeadsProp,
+}: MarketingLeadFormProps) {
+  const campaigns = campaignsProp ?? store.getCampaigns();
+  const users = usersProp ?? store.getUsers();
+  const existingLeads = existingLeadsProp ?? store.getLeads();
 
   const [form, setForm] = useState({
     name: "", phone: "", email: "", source: "", campaignId: "",
@@ -89,15 +99,14 @@ export function MarketingLeadForm({ onSave, onCancel, creatorName = "Marketing" 
   };
 
   const buildLead = (status: "New" | "New Lead"): Lead => {
-    const existing = store.getLeads();
-    const dup = existing.find((l) => l.phone === form.phone || (form.email && l.email === form.email));
+    const dup = existingLeads.find((l) => l.phone === form.phone || (form.email && l.email === form.email));
     if (dup) {
       toast.error(`Possible duplicate lead detected: ${dup.name} (${dup.phone})`);
       throw new Error("duplicate");
     }
 
-    const assignedTelecallerId = getNextTelecaller();
-    const assignedTelecallerName = store.getUsers().find((u) => u.id === assignedTelecallerId)?.name || "";
+    const assignedTelecallerId = getNextTelecaller(users, existingLeads);
+    const assignedTelecallerName = users.find((u) => u.id === assignedTelecallerId)?.name || "";
     const now = new Date();
     const leadId = `l${Date.now()}`;
 
@@ -151,27 +160,31 @@ export function MarketingLeadForm({ onSave, onCancel, creatorName = "Marketing" 
     };
   };
 
-  const handleSaveDraft = () => {
+  const handleSaveDraft = async () => {
     if (!form.name.trim() && !form.phone.trim()) {
       toast.error("Please enter at least a name or phone number to save a draft.");
       return;
     }
     try {
       const lead = buildLead("New");
-      onSave(lead);
+      await Promise.resolve(onSave(lead));
       toast.success("Lead saved as draft.");
       setIsDirty(false);
-    } catch { /* duplicate handled in buildLead */ }
+    } catch {
+      // duplicate handled in buildLead or API save failed in parent
+    }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validate()) return;
     try {
       const lead = buildLead("New Lead");
-      onSave(lead);
+      await Promise.resolve(onSave(lead));
       toast.success("Lead successfully created and assigned for telecalling.");
       setIsDirty(false);
-    } catch { /* duplicate handled in buildLead */ }
+    } catch {
+      // duplicate handled in buildLead or API save failed in parent
+    }
   };
 
   const handleCancel = () => {

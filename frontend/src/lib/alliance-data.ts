@@ -6,6 +6,7 @@ import type {
   AllianceProposal, AllianceEvent, AllianceExpense,
 } from "./alliance-types";
 import { computePriority } from "./alliance-types";
+import { db } from "./db";
 
 const today = new Date();
 const iso = (offsetDays = 0) => {
@@ -60,15 +61,10 @@ const KEYS = {
 } as const;
 
 function load<T>(key: string, defaults: T[]): T[] {
-  const stored = localStorage.getItem(key);
-  if (stored) {
-    try { return JSON.parse(stored); } catch { /* fallthrough */ }
-  }
-  localStorage.setItem(key, JSON.stringify(defaults));
-  return defaults;
+  return db.getOrInitSync(key, defaults);
 }
 function persist<T>(key: string, data: T[]) {
-  localStorage.setItem(key, JSON.stringify(data));
+  db.createSync(key, data);
 }
 
 export const allianceStore = {
@@ -100,7 +96,7 @@ export const allianceStore = {
   // Users
   getUsers: () => allianceUsers,
   // Reset
-  resetAll: () => Object.values(KEYS).forEach((k) => localStorage.removeItem(k)),
+  resetAll: () => Object.values(KEYS).forEach((k) => db.deleteSync(k)),
 };
 
 // CSV export utility

@@ -6,6 +6,7 @@
  * Storage: localStorage (mock store, consistent with rest of Alliance module).
  */
 import type { UserRole } from "./types";
+import { db } from "./db";
 
 export type ApprovalRequestType =
   | "Expense Bill"
@@ -58,14 +59,9 @@ const KEYS = {
 } as const;
 
 function load<T>(key: string, defaults: T[]): T[] {
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw) return JSON.parse(raw) as T[];
-  } catch { /* noop */ }
-  localStorage.setItem(key, JSON.stringify(defaults));
-  return defaults;
+  return db.getOrInitSync(key, defaults);
 }
-function save<T>(key: string, data: T[]) { localStorage.setItem(key, JSON.stringify(data)); }
+function save<T>(key: string, data: T[]) { db.createSync(key, data); }
 const nowIso = () => new Date().toISOString();
 const todayIso = () => new Date().toISOString().split("T")[0];
 
@@ -208,7 +204,7 @@ export const approvalStore = {
     approvalStore.saveLogs([log, ...logs]);
   },
 
-  reset: () => { localStorage.removeItem(KEYS.approvals); localStorage.removeItem(KEYS.logs); },
+  reset: () => { db.deleteSync(KEYS.approvals); db.deleteSync(KEYS.logs); },
 };
 
 // ── Scoped queries ──

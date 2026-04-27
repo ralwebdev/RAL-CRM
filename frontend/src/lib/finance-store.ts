@@ -2,6 +2,7 @@ import {
   Invoice, Payment, EmiSchedule, Expense, Vendor, VendorBill,
   Budget, CashFlowEntry, FinanceLog, ExpenseCategory, PaymentMode, InvoiceType,
 } from "./finance-types";
+import { db } from "./db";
 
 const KEY = "ral_finance_v1";
 type Listener = () => void;
@@ -33,40 +34,43 @@ function seed(): FinanceState {
 }
 
 function load(): FinanceState {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) {
-      const parsed: FinanceState = JSON.parse(raw);
-      // Backward-compat: ensure counters has pi/ti
-      parsed.counters = { pi: 0, ti: 0, ...parsed.counters };
-      // Backfill invoiceType for legacy seeded invoices by status
-      let mutated = false;
-      parsed.invoices.forEach(i => {
-        if (!i.invoiceType) {
-          i.invoiceType = (i.status === "Draft" || i.status === "Sent") ? "PI" : "TI";
-          mutated = true;
-        }
-      });
-      if (mutated) {
-        try { localStorage.setItem(KEY, JSON.stringify(parsed)); } catch {}
+  const parsed = db.readSync<FinanceState>(KEY);
+  if (parsed) {
+    // Backward-compat: ensure counters has pi/ti
+    parsed.counters = { pi: 0, ti: 0, ...parsed.counters };
+    // Backfill legacy invoice fields.
+    let mutated = false;
+    parsed.invoices.forEach(i => {
+      if (!i.invoiceType) {
+        i.invoiceType = (i.status === "Draft" || i.status === "Sent") ? "PI" : "TI";
+        mutated = true;
       }
-      return parsed;
+      // Business rule: Tax Invoices (TI) are generated only after full payment.
+      if (i.invoiceType === "TI" && i.status !== "Cancelled" && (i.amountPaid !== i.total || i.status !== "Paid")) {
+        i.amountPaid = i.total;
+        i.status = "Paid";
+        mutated = true;
+      }
+    });
+    if (mutated) {
+      db.createSync(KEY, parsed);
     }
-  } catch {}
-  const s = seed();
+    return parsed;
+  }
+  const seeded = seed();
   // First-time seed: backfill PI/TI by status
-  s.invoices.forEach(i => {
+  seeded.invoices.forEach(i => {
     if (!i.invoiceType) i.invoiceType = (i.status === "Draft" || i.status === "Sent") ? "PI" : "TI";
   });
-  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {}
-  return s;
+  db.createSync(KEY, seeded);
+  return seeded;
 }
 
 let state: FinanceState = typeof window !== "undefined" ? load() : seed();
 
 function save(s: FinanceState) {
   state = s;
-  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {}
+  db.createSync(KEY, s);
   listeners.forEach(l => l());
 }
 
@@ -136,18 +140,20 @@ export function createInvoice(
 ): Invoice {
   const taxable = input.subtotal - input.discount;
   const gst = input.gstType === "Exempt" ? 0 : taxable * input.gstRate / 100;
+  const total = taxable + gst;
   const type: InvoiceType = input.invoiceType ?? "PI";
   const counterKind = type === "TI" ? "ti" : "pi";
   const prefix = type === "TI" ? "TI" : "PI";
+  const isTaxInvoice = type === "TI";
   const inv: Invoice = {
     ...input,
     invoiceType: type,
     id: uid("inv"),
     invoiceNo: nextNo(counterKind, prefix),
     cgst: gst / 2, sgst: gst / 2, igst: 0,
-    total: taxable + gst,
-    amountPaid: 0,
-    status: type === "TI" ? "Sent" : "Sent",
+    total,
+    amountPaid: isTaxInvoice ? total : 0,
+    status: isTaxInvoice ? "Paid" : "Sent",
     createdBy: by,
     createdAt: todayISO(),
   };
@@ -214,6 +220,12 @@ export function updateInvoice(
     else if (inv.amountPaid > 0) inv.status = "Partial";
     else if (new Date(inv.dueDate).getTime() < Date.now()) inv.status = "Overdue";
     else inv.status = "Sent";
+  }
+
+  // Business rule: TI is always fully paid when active.
+  if (inv.invoiceType === "TI" && inv.status !== "Cancelled") {
+    inv.amountPaid = inv.total;
+    inv.status = "Paid";
   }
 
   log("Invoice", inv.id, "edited", by);
@@ -388,7 +400,8 @@ function refreshPiStatus(pi: Invoice) {
 }
 
 /**
- * Convert (part of) a PI into a new TI. Optionally also record a payment.
+ * Convert (part of) a PI into a new TI.
+ * TI is created as fully paid; optional payment mode only adds a payment log row.
  * Returns { ti, mapping } or null if guard fails.
  */
 export function convertPiToTi(args: {
@@ -432,8 +445,8 @@ export function convertPiToTi(args: {
     sgst: intra ? tiGst / 2 : 0,
     igst: intra ? 0 : tiGst,
     total: tiTaxable + tiGst,
-    amountPaid: 0,
-    status: "Sent",
+    amountPaid: tiTaxable + tiGst,
+    status: "Paid",
     notes: `Converted from ${pi.invoiceNo}`,
     gstin: pi.gstin,
     createdBy: args.by,
@@ -471,8 +484,6 @@ export function convertPiToTi(args: {
       createdAt: todayISO(),
     };
     state.payments.unshift(pay);
-    ti.amountPaid = ti.total;
-    ti.status = "Paid";
     state.cashflow.unshift({ id: uid("cf"), date: pay.paidOn, type: "Inflow", source: "Payment", refId: pay.id, amount: pay.amount });
   }
 
@@ -517,4 +528,3 @@ export function linkExistingTiToPi(args: {
   save({ ...state });
   return { mappingId: mapping.id };
 }
-

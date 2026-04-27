@@ -4,6 +4,7 @@
  */
 import { toast } from "sonner";
 import type { Collection } from "./collection-store";
+import { db } from "./db";
 
 export type CollectionEvent =
   | "new_collection_logged"
@@ -33,13 +34,12 @@ type Listener = () => void;
 const listeners = new Set<Listener>();
 
 function load(): CollectionNotif[] {
-  try { const raw = localStorage.getItem(KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
+  return db.readSync<CollectionNotif[]>(KEY, []) ?? [];
 }
 let state: CollectionNotif[] = typeof window !== "undefined" ? load() : [];
 
 function save() {
-  try { localStorage.setItem(KEY, JSON.stringify(state.slice(0, 200))); } catch {}
+  db.createSync(KEY, state.slice(0, 200));
   listeners.forEach(l => l());
 }
 

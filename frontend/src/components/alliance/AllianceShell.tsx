@@ -22,6 +22,7 @@ import type {
   Institution, AllianceVisit, AllianceTask, AllianceProposal, AllianceEvent, AllianceExpense, AllianceContact,
 } from "@/lib/alliance-types";
 import { cn } from "@/lib/utils";
+import { db } from "@/lib/db";
 
 /* ───── Date helpers ───── */
 export const todayIso = () => new Date().toISOString().split("T")[0];
@@ -358,9 +359,9 @@ export function useStreak(userId?: string) {
   useEffect(() => {
     if (!userId) return;
     try {
-      const raw = localStorage.getItem(`${STREAK_KEY}_${userId}`);
-      if (raw) {
-        const { count, last } = JSON.parse(raw);
+      const value = db.readSync<{ count: number; last: string }>(`${STREAK_KEY}_${userId}`);
+      if (value) {
+        const { count, last } = value;
         const today = todayIso();
         const diff = daysBetween(today, last);
         if (diff === 0) setStreak(count);
@@ -373,14 +374,13 @@ export function useStreak(userId?: string) {
     if (!userId) return;
     const today = todayIso();
     try {
-      const raw = localStorage.getItem(`${STREAK_KEY}_${userId}`);
+      const value = db.readSync<{ count: number; last: string }>(`${STREAK_KEY}_${userId}`);
       let count = 1;
-      if (raw) {
-        const prev = JSON.parse(raw);
-        const diff = daysBetween(today, prev.last);
-        count = diff === 0 ? prev.count : diff === 1 ? prev.count + 1 : 1;
+      if (value) {
+        const diff = daysBetween(today, value.last);
+        count = diff === 0 ? value.count : diff === 1 ? value.count + 1 : 1;
       }
-      localStorage.setItem(`${STREAK_KEY}_${userId}`, JSON.stringify({ count, last: today }));
+      db.createSync(`${STREAK_KEY}_${userId}`, { count, last: today });
       setStreak(count);
     } catch { /* noop */ }
   };

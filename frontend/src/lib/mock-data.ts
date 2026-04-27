@@ -8,6 +8,7 @@ import {
   mockInternshipAdmissions, mockCollegeAccounts, mockCollegePrograms, mockCollegeStudents,
   mockSchoolAccounts, mockSchoolPrograms, mockSchoolStudents, internshipLeadEntries,
 } from "./vertical-data";
+import { db } from "./db";
 
 const defaultUtm: UTMTracking = { utmSource: "", utmMedium: "", utmCampaign: "", utmContent: "", utmTerm: "" };
 
@@ -73,14 +74,11 @@ const STORAGE_KEYS = {
 } as const;
 
 function getOrInit<T>(key: string, defaults: T[]): T[] {
-  const stored = localStorage.getItem(key);
-  if (stored) return JSON.parse(stored);
-  localStorage.setItem(key, JSON.stringify(defaults));
-  return defaults;
+  return db.getOrInitSync(key, defaults);
 }
 
 function save<T>(key: string, data: T[]) {
-  localStorage.setItem(key, JSON.stringify(data));
+  db.createSync(key, data);
 }
 
 export const store = {
@@ -127,6 +125,6 @@ export const store = {
   getUsers: () => mockUsers,
 
   resetAll: () => {
-    Object.values(STORAGE_KEYS).forEach((k) => localStorage.removeItem(k));
+    Object.values(STORAGE_KEYS).forEach((k) => db.deleteSync(k));
   },
 };
