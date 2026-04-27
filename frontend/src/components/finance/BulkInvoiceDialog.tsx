@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
-import { createInvoice } from "@/lib/finance-store";
+import { createInvoiceAsync } from "@/lib/finance-store";
 import { computeBreakup, validateGstInput, GST_SLABS, type GstInputMode } from "@/lib/gst-calc";
 import { fmtINR } from "./FinanceKpi";
 import { Layers, Plus, Trash2 } from "lucide-react";
@@ -45,13 +45,13 @@ export function BulkInvoiceDialog({ open, onClose }: Props) {
     { taxable: 0, gst: 0, gross: 0 },
   );
 
-  const submit = () => {
+  const submit = async () => {
     const v = validateGstInput(valid[0]?.amount || 0, rate);
     if (!valid.length) { toast({ title: "Add at least one valid row.", variant: "destructive" }); return; }
     if (!v.ok) { toast({ title: v.error || "Invalid GST configuration.", variant: "destructive" }); return; }
-    valid.forEach(r => {
+    for (const r of valid) {
       const b = computeBreakup(r.amount, rate, mode, intra);
-      const inv = createInvoice({
+      const inv = await createInvoiceAsync({
         customerId: "c_" + Math.random().toString(36).slice(2, 6),
         customerName: r.recipient.trim(), customerType: "Student",
         revenueStream: "Student Admissions",
@@ -63,7 +63,7 @@ export function BulkInvoiceDialog({ open, onClose }: Props) {
         notes: "Generated via Bulk Invoice Generator",
       } as any, currentUser?.id || "u0");
       inv.cgst = b.cgst; inv.sgst = b.sgst; inv.igst = b.igst;
-    });
+    }
     toast({ title: `${valid.length} invoices generated`, description: `Total ${fmtINR(totals.gross)} (GST ${fmtINR(totals.gst)})` });
     onClose();
   };
@@ -140,7 +140,7 @@ export function BulkInvoiceDialog({ open, onClose }: Props) {
             <div><div className="text-muted-foreground">Grand Total</div><div className="font-semibold text-sm tabular-nums text-primary">{fmtINR(totals.gross)}</div></div>
           </Card>
 
-          <Button className="w-full" onClick={submit} disabled={!valid.length}>Generate {valid.length || ""} Invoice{valid.length === 1 ? "" : "s"}</Button>
+          <Button className="w-full" onClick={() => void submit()} disabled={!valid.length}>Generate {valid.length || ""} Invoice{valid.length === 1 ? "" : "s"}</Button>
         </div>
       </DialogContent>
     </Dialog>

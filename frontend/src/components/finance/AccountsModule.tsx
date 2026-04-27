@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useAuth } from "@/lib/auth-context";
 import {
   getFinance, subscribeFinance, recomputeOverdue,
-  createInvoice, recordPayment, createExpense, setExpenseStatus,
-  createVendor, createVendorBill, payVendorBill, createBudget, payEmi, autoSeedEmisForPartial,
+  hydrateFinanceFromBackend,
+  createInvoiceAsync, recordPaymentAsync, createExpenseAsync, setExpenseStatusAsync,
+  createVendorAsync, createVendorBillAsync, payVendorBillAsync,
+  createBudget, payEmi, autoSeedEmisForPartial,
 } from "@/lib/finance-store";
 import {
   Invoice, Payment, Expense, Vendor, VendorBill, Budget, EmiSchedule,
@@ -116,7 +118,12 @@ export function AccountsModule() {
   const tabs = ALL_TABS.filter(t => t.roles.includes(role));
   const [tab, setTab] = useState(tabs[0].id);
 
-  useEffect(() => { recomputeOverdue(); autoSeedEmisForPartial(); scanPiDueAlerts(getFinance().invoices); }, []);
+  useEffect(() => {
+    void hydrateFinanceFromBackend().catch(() => { });
+    recomputeOverdue();
+    autoSeedEmisForPartial();
+    scanPiDueAlerts(getFinance().invoices);
+  }, []);
 
   // Admin gets a focused, single-tab Verification Control Center —
   // no duplicate Billing Chart, no invoice issuance surfaces.
@@ -673,12 +680,12 @@ function InvoiceFormDrawer({ open, onClose }: { open: boolean; onClose: () => vo
   const effectiveRate = f.gstType === "Exempt" ? 0 : f.gstRate;
   const breakup = computeBreakup(Math.max(0, f.amount - f.discount), effectiveRate, f.mode, f.intra);
 
-  const submit = () => {
+  const submit = async () => {
     if (!f.customerName.trim()) { toast({ title: "Recipient name required.", variant: "destructive" }); return; }
     if (!f.dueDate) { toast({ title: "PI due date is required.", variant: "destructive" }); return; }
     const v = validateGstInput(f.amount, effectiveRate);
     if (!v.ok) { toast({ title: v.error || "Invalid amount", variant: "destructive" }); return; }
-    const inv = createInvoice({
+    const inv = await createInvoiceAsync({
       invoiceType: "PI",
       customerId: "c_" + Math.random().toString(36).slice(2, 6),
       customerName: f.customerName.trim(), customerType: f.customerType,
@@ -745,7 +752,7 @@ function InvoiceFormDrawer({ open, onClose }: { open: boolean; onClose: () => vo
 
         <div><Label>Notes</Label><Textarea rows={2} value={f.notes} onChange={e => setF({ ...f, notes: e.target.value })} /></div>
         <p className="text-[11px] text-muted-foreground">Taxable fee and GST are calculated automatically based on the selected mode.</p>
-        <Button className="w-full" onClick={submit}>Create Invoice</Button>
+        <Button className="w-full" onClick={() => void submit()}>Create Invoice</Button>
       </div>
     </FinanceDrawer>
   );
@@ -760,9 +767,9 @@ function InvoiceViewDrawer({ invoice, onClose }: { invoice: Invoice | null; onCl
   if (!invoice) return null;
   const due = invoice.total - invoice.amountPaid;
 
-  const collect = () => {
+  const collect = async () => {
     if (amount <= 0 || amount > due) { toast({ title: `Enter amount up to ${fmtINR(due)}`, variant: "destructive" }); return; }
-    recordPayment({
+    await recordPaymentAsync({
       invoiceId: invoice.id, customerId: invoice.customerId, customerName: invoice.customerName,
       amount, mode, paidOn: new Date().toISOString(), reference: `MANUAL-${Date.now()}`,
       recordedBy: currentUser?.id || "u0",
@@ -801,7 +808,7 @@ function InvoiceViewDrawer({ invoice, onClose }: { invoice: Invoice | null; onCl
                 </Select>
               </div>
             </div>
-            <Button className="w-full" onClick={collect}>Record Collection</Button>
+            <Button className="w-full" onClick={() => void collect()}>Record Collection</Button>
           </Card>
         )}
       </div>
@@ -892,7 +899,7 @@ function ExpensesTab({ role }: { role: RoleScope }) {
       syncApprovalToExpense(updated, currentUser?.id || "u0");
     } else {
       // fallback (legacy expenses without an approval record)
-      setExpenseStatus(exp.id, action === "Approve" ? "Approved" : "Rejected", currentUser?.id || "u0");
+      void setExpenseStatusAsync(exp.id, action === "Approve" ? "Approved" : "Rejected", currentUser?.id || "u0");
     }
     toast({ title: action === "Approve" ? "Expense approved" : "Expense rejected" });
   };
@@ -945,10 +952,10 @@ function ExpenseFormDrawer({ open, onClose }: { open: boolean; onClose: () => vo
     paymentMode: "Bank" as PaymentMode,
   });
 
-  const submit = () => {
+  const submit = async () => {
     if (f.amount <= 0 || !f.description) { toast({ title: "Fill amount + description", variant: "destructive" }); return; }
     const vendor = fin.vendors.find(v => v.id === f.vendorId);
-    const exp = createExpense({
+    const exp = await createExpenseAsync({
       category: f.category,
       vendorId: vendor?.id, vendorName: vendor?.name,
       amount: f.amount, gst: f.gst,
@@ -1006,7 +1013,7 @@ function ExpenseFormDrawer({ open, onClose }: { open: boolean; onClose: () => vo
         <Card className="p-2 bg-muted/30 text-xs flex justify-between">
           <span>Total</span><b>{fmtINR(f.amount + f.gst)}</b>
         </Card>
-        <Button className="w-full" onClick={submit}>Submit Expense</Button>
+        <Button className="w-full" onClick={() => void submit()}>Submit Expense</Button>
       </div>
     </FinanceDrawer>
   );
@@ -1045,7 +1052,7 @@ function VendorsTab({ role }: { role: RoleScope }) {
     { key: "status", header: "Status", render: r => <StatusPill status={r.status} tone={statusTone(r.status)} />, exportValue: r => r.status },
     {
       key: "actions", header: "", render: r => r.status !== "Paid" && (role === "owner" || role === "manager")
-        ? <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); payVendorBill(r.id, r.total - r.paid, currentUser?.id || "u0"); toast({ title: "Payment released" }); }}>Pay</Button>
+        ? <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); void payVendorBillAsync(r.id, r.total - r.paid, currentUser?.id || "u0"); toast({ title: "Payment released" }); }}>Pay</Button>
         : null
     },
   ];
@@ -1095,8 +1102,11 @@ function VendorFormDrawer({ open, onClose }: { open: boolean; onClose: () => voi
         <div><Label>Email</Label><Input value={f.email} onChange={e => setF({ ...f, email: e.target.value })} /></div>
         <Button className="w-full" onClick={() => {
           if (!f.name) { toast({ title: "Name required", variant: "destructive" }); return; }
-          createVendor(f as any, currentUser?.id || "u0");
-          toast({ title: "Vendor added" }); onClose();
+          void (async () => {
+            await createVendorAsync(f as any, currentUser?.id || "u0");
+            toast({ title: "Vendor added" });
+            onClose();
+          })();
         }}>Save Vendor</Button>
       </div>
     </FinanceDrawer>
@@ -1129,12 +1139,15 @@ function VendorBillFormDrawer({ open, onClose }: { open: boolean; onClose: () =>
         <Button className="w-full" onClick={() => {
           const vendor = fin.vendors.find(v => v.id === f.vendorId);
           if (!vendor || !f.billNo || f.amount <= 0) { toast({ title: "Vendor + bill # + amount required", variant: "destructive" }); return; }
-          createVendorBill({
-            billNo: f.billNo, vendorId: vendor.id, vendorName: vendor.name,
-            billDate: new Date(f.billDate).toISOString(), dueDate: new Date(f.dueDate).toISOString(),
-            amount: f.amount, gst: f.gst, notes: f.notes,
-          } as any, currentUser?.id || "u0");
-          toast({ title: "Bill added" }); onClose();
+          void (async () => {
+            await createVendorBillAsync({
+              billNo: f.billNo, vendorId: vendor.id, vendorName: vendor.name,
+              billDate: new Date(f.billDate).toISOString(), dueDate: new Date(f.dueDate).toISOString(),
+              amount: f.amount, gst: f.gst, notes: f.notes,
+            } as any, currentUser?.id || "u0");
+            toast({ title: "Bill added" });
+            onClose();
+          })();
         }}>Save Bill</Button>
       </div>
     </FinanceDrawer>

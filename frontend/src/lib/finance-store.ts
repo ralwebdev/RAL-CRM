@@ -3,6 +3,20 @@ import {
   Budget, CashFlowEntry, FinanceLog, ExpenseCategory, PaymentMode, InvoiceType,
 } from "./finance-types";
 import { db } from "./db";
+import {
+  fetchFinanceSnapshot,
+  createFinanceInvoice,
+  updateFinanceInvoice,
+  createFinancePayment,
+  createFinanceExpense,
+  updateFinanceExpense,
+  createFinanceVendor,
+  updateFinanceVendor,
+  createFinanceVendorBill,
+  updateFinanceVendorBill,
+  createFinanceEmiSchedule,
+  updateFinanceEmiSchedule,
+} from "./finance-api";
 
 const KEY = "ral_finance_v1";
 type Listener = () => void;
@@ -67,6 +81,7 @@ function load(): FinanceState {
 }
 
 let state: FinanceState = typeof window !== "undefined" ? load() : seed();
+let hydratedFromBackend = false;
 
 function save(s: FinanceState) {
   state = s;
@@ -82,6 +97,26 @@ export function subscribeFinance(l: Listener) {
 export function getFinance() { return state; }
 
 export function resetFinance() { save(seed()); }
+
+export async function hydrateFinanceFromBackend(): Promise<void> {
+  if (typeof window === "undefined") return;
+  const snap = await fetchFinanceSnapshot();
+  const next: FinanceState = {
+    ...seed(),
+    invoices: snap.invoices,
+    payments: snap.payments,
+    expenses: snap.expenses,
+    vendors: snap.vendors,
+    vendorBills: snap.vendorBills,
+    emiSchedules: snap.emiSchedules,
+  };
+  hydratedFromBackend = true;
+  save(next);
+}
+
+export function isFinanceHydratedFromBackend(): boolean {
+  return hydratedFromBackend;
+}
 
 /**
  * One-time auto-seeding: any Partial invoice without an EMI schedule gets
@@ -163,6 +198,31 @@ export function createInvoice(
   return inv;
 }
 
+export async function createInvoiceAsync(
+  input: Omit<Invoice, "id" | "invoiceNo" | "createdAt" | "cgst" | "sgst" | "igst" | "total" | "amountPaid" | "status">,
+  by: string,
+): Promise<Invoice> {
+  if (!hydratedFromBackend) return createInvoice(input, by);
+  const taxable = input.subtotal - input.discount;
+  const gst = input.gstType === "Exempt" ? 0 : taxable * input.gstRate / 100;
+  const total = taxable + gst;
+  const intra = true; // frontend defaults to intra unless overridden elsewhere; backend accepts cgst/sgst/igst explicitly
+  const payload: Partial<Invoice> = {
+    ...input,
+    cgst: intra ? gst / 2 : 0,
+    sgst: intra ? gst / 2 : 0,
+    igst: intra ? 0 : gst,
+    total,
+    amountPaid: input.invoiceType === "TI" ? total : 0,
+    status: input.invoiceType === "TI" ? "Paid" : "Sent",
+  };
+  const created = await createFinanceInvoice(payload);
+  state.invoices.unshift(created);
+  log("Invoice", created.id, `created ${created.invoiceType || "TI"}`, by);
+  save({ ...state });
+  return created;
+}
+
 
 export function recordPayment(input: Omit<Payment, "id" | "receiptNo" | "createdAt">, by: string): Payment {
   const pay: Payment = {
@@ -184,6 +244,24 @@ export function recordPayment(input: Omit<Payment, "id" | "receiptNo" | "created
   log("Payment", pay.id, "recorded", by);
   save({ ...state });
   return pay;
+}
+
+export async function recordPaymentAsync(input: Omit<Payment, "id" | "receiptNo" | "createdAt">, by: string): Promise<Payment> {
+  if (!hydratedFromBackend) return recordPayment(input, by);
+  const created = await createFinancePayment({ ...input });
+  state.payments.unshift(created);
+  if (created.invoiceId) {
+    const inv = state.invoices.find(i => i.id === created.invoiceId);
+    if (inv) {
+      inv.amountPaid += created.amount;
+      inv.status = inv.amountPaid >= inv.total ? "Paid" : "Partial";
+      await updateFinanceInvoice(inv.id, { amountPaid: inv.amountPaid, status: inv.status });
+    }
+  }
+  state.cashflow.unshift({ id: uid("cf"), date: created.paidOn, type: "Inflow", source: "Payment", refId: created.id, amount: created.amount });
+  log("Payment", created.id, "recorded", by);
+  save({ ...state });
+  return created;
 }
 
 /** Apply a partial patch to an invoice with auto-recalc of cgst/sgst/igst/total/status. */
@@ -233,12 +311,32 @@ export function updateInvoice(
   return inv;
 }
 
+export async function updateInvoiceAsync(
+  id: string,
+  patch: Parameters<typeof updateInvoice>[1],
+  by: string,
+): Promise<Invoice | null> {
+  const inv = updateInvoice(id, patch as any, by);
+  if (!inv) return null;
+  if (!hydratedFromBackend) return inv;
+  await updateFinanceInvoice(id, patch as Partial<Invoice>);
+  return inv;
+}
+
 export function cancelInvoice(id: string, by: string, reason?: string): Invoice | null {
   const inv = state.invoices.find(i => i.id === id);
   if (!inv) return null;
   inv.status = "Cancelled";
   log("Invoice", id, "cancelled", by, reason);
   save({ ...state });
+  return inv;
+}
+
+export async function cancelInvoiceAsync(id: string, by: string, reason?: string): Promise<Invoice | null> {
+  const inv = cancelInvoice(id, by, reason);
+  if (!inv) return null;
+  if (!hydratedFromBackend) return inv;
+  await updateFinanceInvoice(id, { status: "Cancelled", notes: inv.notes });
   return inv;
 }
 
@@ -261,6 +359,27 @@ export function cloneInvoice(id: string, by: string): Invoice | null {
   return cloned;
 }
 
+export async function cloneInvoiceAsync(id: string, by: string): Promise<Invoice | null> {
+  const src = state.invoices.find(i => i.id === id);
+  if (!src) return null;
+  if (!hydratedFromBackend) return cloneInvoice(id, by);
+  const payload: Partial<Invoice> = {
+    ...src,
+    id: undefined as any,
+    invoiceNo: "",
+    amountPaid: 0,
+    status: "Draft",
+    issueDate: todayISO(),
+    createdBy: by,
+    createdAt: todayISO(),
+  };
+  const created = await createFinanceInvoice(payload);
+  state.invoices.unshift(created);
+  log("Invoice", created.id, "cloned", by, `from ${src.invoiceNo}`);
+  save({ ...state });
+  return created;
+}
+
 /* ───────── Expenses ───────── */
 export function createExpense(input: Omit<Expense, "id" | "expenseNo" | "createdAt" | "total">, by: string): Expense {
   const exp: Expense = {
@@ -271,6 +390,23 @@ export function createExpense(input: Omit<Expense, "id" | "expenseNo" | "created
     submittedBy: by,
     createdAt: todayISO(),
   };
+  state.expenses.unshift(exp);
+  if (exp.status === "Approved") {
+    state.cashflow.unshift({ id: uid("cf"), date: exp.spendDate, type: "Outflow", source: "Expense", refId: exp.id, amount: exp.total });
+  }
+  log("Expense", exp.id, "created", by);
+  save({ ...state });
+  return exp;
+}
+
+export async function createExpenseAsync(input: Omit<Expense, "id" | "expenseNo" | "createdAt" | "total">, by: string): Promise<Expense> {
+  if (!hydratedFromBackend) return createExpense(input, by);
+  const exp = await createFinanceExpense({
+    ...input,
+    total: (input.amount || 0) + (input.gst || 0),
+    spendDate: input.spendDate,
+    submittedBy: by,
+  });
   state.expenses.unshift(exp);
   if (exp.status === "Approved") {
     state.cashflow.unshift({ id: uid("cf"), date: exp.spendDate, type: "Outflow", source: "Expense", refId: exp.id, amount: exp.total });
@@ -292,9 +428,32 @@ export function setExpenseStatus(id: string, status: Expense["status"], by: stri
   save({ ...state });
 }
 
+export async function payVendorBillAsync(id: string, amount: number, by: string): Promise<void> {
+  payVendorBill(id, amount, by);
+  if (!hydratedFromBackend) return;
+  const bill = state.vendorBills.find(x => x.id === id);
+  if (!bill) return;
+  await updateFinanceVendorBill(id, { paid: bill.paid, status: bill.status });
+}
+
+export async function setExpenseStatusAsync(id: string, status: Expense["status"], by: string): Promise<void> {
+  setExpenseStatus(id, status, by);
+  if (!hydratedFromBackend) return;
+  await updateFinanceExpense(id, { status });
+}
+
 /* ───────── Vendors ───────── */
 export function createVendor(input: Omit<Vendor, "id" | "createdAt">, by: string): Vendor {
   const v: Vendor = { ...input, id: uid("ven"), createdAt: todayISO() };
+  state.vendors.unshift(v);
+  log("Vendor", v.id, "created", by);
+  save({ ...state });
+  return v;
+}
+
+export async function createVendorAsync(input: Omit<Vendor, "id" | "createdAt">, by: string): Promise<Vendor> {
+  if (!hydratedFromBackend) return createVendor(input, by);
+  const v = await createFinanceVendor({ ...input });
   state.vendors.unshift(v);
   log("Vendor", v.id, "created", by);
   save({ ...state });
@@ -311,6 +470,18 @@ export function createVendorBill(input: Omit<VendorBill, "id" | "createdAt" | "t
     total, paid, status,
     createdAt: todayISO(),
   };
+  state.vendorBills.unshift(bill);
+  log("VendorBill", bill.id, "created", by);
+  save({ ...state });
+  return bill;
+}
+
+export async function createVendorBillAsync(input: Omit<VendorBill, "id" | "createdAt" | "total" | "paid" | "status"> & { paid?: number; status?: VendorBill["status"] }, by: string): Promise<VendorBill> {
+  if (!hydratedFromBackend) return createVendorBill(input, by);
+  const total = input.amount + input.gst;
+  const paid = input.paid ?? 0;
+  const status: VendorBill["status"] = input.status ?? (paid >= total ? "Paid" : new Date(input.dueDate) < new Date() ? "Overdue" : "Pending");
+  const bill = await createFinanceVendorBill({ ...input, total, paid, status });
   state.vendorBills.unshift(bill);
   log("VendorBill", bill.id, "created", by);
   save({ ...state });

@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
-import { createInvoice } from "@/lib/finance-store";
+import { createInvoiceAsync } from "@/lib/finance-store";
 import { computeBreakup, detectIntraState, validateGstInput, type GstInputMode } from "@/lib/gst-calc";
 import { GstAmountInput } from "./GstAmountInput";
 import { fmtINR } from "./FinanceKpi";
@@ -37,12 +37,12 @@ export function QuickInvoiceDialog({ open, onClose }: Props) {
     if (!intraOverridden) setIntra(detectIntraState(gstin));
   }, [gstin, intraOverridden]);
 
-  const submit = () => {
+  const submit = async () => {
     if (!recipient.trim()) { toast({ title: "Recipient name required.", variant: "destructive" }); return; }
     const v = validateGstInput(amount, rate);
     if (!v.ok) { toast({ title: v.error || "Invalid amount", variant: "destructive" }); return; }
     const b = computeBreakup(amount, rate, mode, intra);
-    const inv = createInvoice({
+    const inv = await createInvoiceAsync({
       invoiceType: "TI",
       customerId: "c_" + Math.random().toString(36).slice(2, 6),
       customerName: recipient.trim(), customerType: "Student",
@@ -82,7 +82,7 @@ export function QuickInvoiceDialog({ open, onClose }: Props) {
             onAmountChange={setAmount} onRateChange={setRate} onModeChange={setMode}
             onIntraStateChange={(v, manual) => { setIntra(v); if (manual) setIntraOverridden(true); }}
           />
-          <Button className="w-full" onClick={submit}>Generate Tax Invoice</Button>
+          <Button className="w-full" onClick={() => void submit()}>Generate Tax Invoice</Button>
         </div>
       </DialogContent>
     </Dialog>

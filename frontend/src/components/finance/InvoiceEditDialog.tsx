@@ -23,7 +23,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertTriangle, ShieldCheck, Copy, XCircle, FileText, RefreshCw, Send } from "lucide-react";
 import type { Invoice, GstType, RevenueStream } from "@/lib/finance-types";
-import { updateInvoice, cancelInvoice, cloneInvoice } from "@/lib/finance-store";
+import { updateInvoiceAsync, cancelInvoiceAsync, cloneInvoiceAsync } from "@/lib/finance-store";
 import {
   recordInvoiceEdit, diffInvoice, HIGH_VALUE_THRESHOLD,
 } from "@/lib/invoice-edit-store";
@@ -124,7 +124,7 @@ export function InvoiceEditDialog({ invoice, open, onClose }: Props) {
 
   const canSave = !!reason.trim() && reauthOk && (isOwner || isManager);
 
-  const save = (afterAction?: "regenerate" | "resend") => {
+  const save = async (afterAction?: "regenerate" | "resend") => {
     if (!canSave) {
       if (!reason.trim()) toast({ title: "Reason required", description: "Please describe why this invoice is being edited.", variant: "destructive" });
       else if (!reauthOk) toast({ title: "Reauth required", description: "Type CONFIRM to authorise sensitive edits.", variant: "destructive" });
@@ -173,7 +173,7 @@ export function InvoiceEditDialog({ invoice, open, onClose }: Props) {
       intraState: f.intra,
     };
     const { oldValues, newValues } = diffInvoice(invoice, patch as Partial<Invoice>);
-    const updated = updateInvoice(invoice.id, patch, currentUser?.id || "u0");
+    const updated = await updateInvoiceAsync(invoice.id, patch as any, currentUser?.id || "u0");
     if (!updated) { toast({ title: "Update failed", variant: "destructive" }); return; }
 
     recordInvoiceEdit({
@@ -204,10 +204,10 @@ export function InvoiceEditDialog({ invoice, open, onClose }: Props) {
     onClose();
   };
 
-  const doCancel = () => {
+  const doCancel = async () => {
     if (!reason.trim()) { toast({ title: "Reason required to cancel", variant: "destructive" }); return; }
     if (!reauthOk) { toast({ title: "Reauth required", description: "Type CONFIRM.", variant: "destructive" }); return; }
-    cancelInvoice(invoice.id, currentUser?.id || "u0", reason);
+    await cancelInvoiceAsync(invoice.id, currentUser?.id || "u0", reason);
     recordInvoiceEdit({
       invoiceId: invoice.id, invoiceNo: invoice.invoiceNo, action: "cancel",
       oldValues: { status: invoice.status }, newValues: { status: "Cancelled" },
@@ -218,8 +218,8 @@ export function InvoiceEditDialog({ invoice, open, onClose }: Props) {
     onClose();
   };
 
-  const doClone = () => {
-    const cloned = cloneInvoice(invoice.id, currentUser?.id || "u0");
+  const doClone = async () => {
+    const cloned = await cloneInvoiceAsync(invoice.id, currentUser?.id || "u0");
     if (cloned) {
       recordInvoiceEdit({
         invoiceId: cloned.id, invoiceNo: cloned.invoiceNo, action: "clone",
@@ -233,7 +233,7 @@ export function InvoiceEditDialog({ invoice, open, onClose }: Props) {
     }
   };
 
-  const doConvertPiToTi = () => {
+  const doConvertPiToTi = async () => {
     // Convert proforma label – we mark notes + record event. Real PI/TI is via dispatch docType.
     recordInvoiceEdit({
       invoiceId: invoice.id, invoiceNo: invoice.invoiceNo, action: "convert_pi_to_ti",
@@ -243,7 +243,7 @@ export function InvoiceEditDialog({ invoice, open, onClose }: Props) {
       reauthConfirmed: true,
       editedBy: currentUser?.id || "u0", editedByName: currentUser?.name, editedByRole: role,
     });
-    updateInvoice(invoice.id, { notes: (invoice.notes || "") + " [Converted PI→TI]" }, currentUser?.id || "u0");
+    await updateInvoiceAsync(invoice.id, { notes: (invoice.notes || "") + " [Converted PI→TI]" } as any, currentUser?.id || "u0");
     toast({ title: "Converted PI → Tax Invoice", description: "Open Send dialog and choose Tax Invoice document type." });
     onClose();
   };
@@ -365,22 +365,22 @@ export function InvoiceEditDialog({ invoice, open, onClose }: Props) {
 
         {/* Primary actions */}
         <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border">
-          <Button onClick={() => save()} disabled={!canSave} className="gap-1.5">
+          <Button onClick={() => void save()} disabled={!canSave} className="gap-1.5">
             <FileText className="h-4 w-4" /> Save Changes
           </Button>
-          <Button variant="outline" onClick={() => save("regenerate")} disabled={!canSave} className="gap-1.5">
+          <Button variant="outline" onClick={() => void save("regenerate")} disabled={!canSave} className="gap-1.5">
             <RefreshCw className="h-4 w-4" /> Save & Regenerate PDF
           </Button>
-          <Button variant="outline" onClick={() => save("resend")} disabled={!canSave} className="gap-1.5">
+          <Button variant="outline" onClick={() => void save("resend")} disabled={!canSave} className="gap-1.5">
             <Send className="h-4 w-4" /> Save & Resend
           </Button>
-          <Button variant="outline" onClick={doClone} className="gap-1.5">
+          <Button variant="outline" onClick={() => void doClone()} className="gap-1.5">
             <Copy className="h-4 w-4" /> Clone Invoice
           </Button>
-          <Button variant="outline" onClick={doConvertPiToTi} className="gap-1.5">
+          <Button variant="outline" onClick={() => void doConvertPiToTi()} className="gap-1.5">
             <FileText className="h-4 w-4" /> Convert PI → TI
           </Button>
-          <Button variant="destructive" onClick={doCancel} disabled={!reason.trim() || !reauthOk} className="gap-1.5">
+          <Button variant="destructive" onClick={() => void doCancel()} disabled={!reason.trim() || !reauthOk} className="gap-1.5">
             <XCircle className="h-4 w-4" /> Cancel Invoice
           </Button>
         </div>

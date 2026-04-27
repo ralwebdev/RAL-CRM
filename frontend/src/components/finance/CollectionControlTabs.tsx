@@ -30,7 +30,7 @@ import {
   notifyVerified, notifyMismatch, notifyTiGeneratedFromCollection,
   scanStalePendingVerifications,
 } from "@/lib/collection-notifications";
-import { createInvoice, getFinance } from "@/lib/finance-store";
+import { createInvoiceAsync, getFinance } from "@/lib/finance-store";
 import { computeBreakup } from "@/lib/gst-calc";
 import { FinanceKpi, fmtINR } from "./FinanceKpi";
 
@@ -296,14 +296,14 @@ export function VerifiedPaymentsTab({ role }: { role: "owner" | "manager" | "exe
   const generated = items.filter(c => c.status === "Invoice Generated");
   const blocked = items.filter(c => c.status === "Awaiting Verification" || c.status === "Mismatch");
 
-  const generate = (c: Collection) => {
+  const generate = async (c: Collection) => {
     if (c.status !== "Verified" && c.status !== "Ready For Invoice") {
       toast.error("Tax Invoice can only be created after admin verification.");
       return;
     }
     const amount = c.verifiedAmount ?? c.amount;
     const breakup = computeBreakup(amount, 18, "gross_inclusive", true);
-    const inv = createInvoice({
+    const inv = await createInvoiceAsync({
       invoiceType: "TI",
       customerId: c.studentId,
       customerName: c.studentName,
@@ -317,7 +317,7 @@ export function VerifiedPaymentsTab({ role }: { role: "owner" | "manager" | "exe
       gstType: "Taxable",
       gstRate: 18,
       notes: `From verified collection ${c.receiptRef}`,
-    } as Parameters<typeof createInvoice>[0], currentUser?.id || "u0");
+    } as any, currentUser?.id || "u0");
     inv.cgst = breakup.cgst; inv.sgst = breakup.sgst; inv.igst = breakup.igst;
 
     const updated = linkTiToCollection(c.id, inv.id, inv.invoiceNo, {
@@ -331,7 +331,7 @@ export function VerifiedPaymentsTab({ role }: { role: "owner" | "manager" | "exe
       toast.error("Type CONFIRM to override the verification gate.");
       return;
     }
-    if (overrideTarget) generate(overrideTarget);
+    if (overrideTarget) void generate(overrideTarget);
     setOverrideTarget(null);
     setOverrideText("");
   };
@@ -371,7 +371,7 @@ export function VerifiedPaymentsTab({ role }: { role: "owner" | "manager" | "exe
                 <TableCell className="text-right text-xs tabular-nums">{fmtINR(c.verifiedAmount ?? c.amount)}</TableCell>
                 <TableCell className="text-xs">{c.verifiedByName || "—"}</TableCell>
                 <TableCell className="text-right">
-                  <Button size="sm" className="h-7 text-xs" onClick={() => generate(c)}>
+                  <Button size="sm" className="h-7 text-xs" onClick={() => void generate(c)}>
                     <Receipt className="h-3 w-3 mr-1" /> Generate TI
                   </Button>
                 </TableCell>

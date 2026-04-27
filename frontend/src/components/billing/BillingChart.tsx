@@ -32,7 +32,7 @@ import {
   accountsPrepareDraft, accountsIssueInvoice,
   type Collection,
 } from "@/lib/collection-store";
-import { createInvoice } from "@/lib/finance-store";
+import { createInvoiceAsync } from "@/lib/finance-store";
 import { computeBreakup } from "@/lib/gst-calc";
 import { notifyInvoiceIssued, notifyRequestRejected, scanStaleInvoiceRequests } from "@/lib/collection-notifications";
 import type { UserRole } from "@/lib/types";
@@ -344,7 +344,7 @@ function AccountsBilling() {
 
   const actor = { id: currentUser?.id || "u0", name: currentUser?.name || "Accounts", role: role || "accounts_manager" };
 
-  const issue = (c: Collection) => {
+  const issue = async (c: Collection) => {
     const r = c.invoiceRequest;
     if (!r) return;
     if (r.type === "TI" && c.status !== "Verified" && c.status !== "Ready For Invoice" && c.collectorRole !== "admin") {
@@ -353,7 +353,7 @@ function AccountsBilling() {
     }
     const amount = c.verifiedAmount ?? c.amount;
     const breakup = computeBreakup(amount, 18, "gross_inclusive", true);
-    const inv = createInvoice({
+    const inv = await createInvoiceAsync({
       invoiceType: r.type === "TI" ? "TI" : "PI",
       customerId: c.studentId,
       customerName: c.studentName,
@@ -367,7 +367,7 @@ function AccountsBilling() {
       gstType: "Taxable",
       gstRate: 18,
       notes: `Issued from ${c.receiptRef} via Billing Chart`,
-    } as Parameters<typeof createInvoice>[0], actor.id);
+    } as any, actor.id);
     inv.cgst = breakup.cgst; inv.sgst = breakup.sgst; inv.igst = breakup.igst;
 
     const updated = accountsIssueInvoice(c.id, inv.id, inv.invoiceNo, actor);
@@ -436,7 +436,7 @@ function AccountsBilling() {
                       </Button>
                     )}
                     {isManager && !blockedTi && (
-                      <Button size="sm" className="h-7 text-xs" onClick={() => issue(c)}>
+                      <Button size="sm" className="h-7 text-xs" onClick={() => void issue(c)}>
                         <Receipt className="h-3 w-3 mr-1" /> Issue {r.type}
                       </Button>
                     )}

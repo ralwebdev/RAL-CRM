@@ -38,7 +38,7 @@ import {
 import {
   notifyInvoiceIssued, notifyRequestRejected, scanStaleInvoiceRequests,
 } from "@/lib/collection-notifications";
-import { createInvoice } from "@/lib/finance-store";
+import { createInvoiceAsync } from "@/lib/finance-store";
 import { computeBreakup } from "@/lib/gst-calc";
 import { LogCollectionDialog } from "@/components/counseling/LogCollectionDialog";
 import { FinanceKpi, fmtINR } from "./FinanceKpi";
@@ -217,7 +217,7 @@ export function InvoiceRequestsTab({ role }: { role: "owner" | "manager" | "exec
     return false; // executives prepare drafts only
   };
 
-  const issue = (c: Collection) => {
+  const issue = async (c: Collection) => {
     const r = c.invoiceRequest;
     if (!r) return;
     // Crosscheck guard: TI must come from verified collection unless owner override.
@@ -227,7 +227,7 @@ export function InvoiceRequestsTab({ role }: { role: "owner" | "manager" | "exec
     }
     const amount = c.verifiedAmount ?? c.amount;
     const breakup = computeBreakup(amount, 18, "gross_inclusive", true);
-    const inv = createInvoice({
+    const inv = await createInvoiceAsync({
       invoiceType: r.type === "TI" ? "TI" : "PI",
       customerId: c.studentId,
       customerName: c.studentName,
@@ -241,7 +241,7 @@ export function InvoiceRequestsTab({ role }: { role: "owner" | "manager" | "exec
       gstType: "Taxable",
       gstRate: 18,
       notes: `Issued from ${c.receiptRef} (${c.collectorRole === "admin" ? "Admin direct" : "Counselor request"})`,
-    } as Parameters<typeof createInvoice>[0], actor.id);
+    } as any, actor.id);
     inv.cgst = breakup.cgst; inv.sgst = breakup.sgst; inv.igst = breakup.igst;
 
     const updated = accountsIssueInvoice(c.id, inv.id, inv.invoiceNo, actor);
@@ -274,7 +274,7 @@ export function InvoiceRequestsTab({ role }: { role: "owner" | "manager" | "exec
       toast.error("Type CONFIRM to override the gate.");
       return;
     }
-    if (overrideTarget) issue(overrideTarget);
+    if (overrideTarget) void issue(overrideTarget);
     setOverrideTarget(null); setOverrideText("");
   };
 
@@ -317,7 +317,7 @@ export function InvoiceRequestsTab({ role }: { role: "owner" | "manager" | "exec
                 </Button>
               )}
               {issuableByMe(c) && !blockedTi && (
-                <Button size="sm" className="h-7 text-xs" onClick={() => issue(c)}>
+                <Button size="sm" className="h-7 text-xs" onClick={() => void issue(c)}>
                   <Receipt className="h-3 w-3 mr-1" /> Issue {r.type}
                 </Button>
               )}
