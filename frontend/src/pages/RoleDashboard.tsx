@@ -1407,6 +1407,8 @@ export default function RoleDashboard() {
     case "admin": return <AdminDashboard />;
     case "alliance_manager": return <AllianceManagerDashboard />;
     case "alliance_executive": return <AllianceExecutiveDashboard />;
+    case "accounts_executive": return <AccountsExecutiveDashboard />;
+    case "accounts_manager": return <AccountsModule />;
     default: return (
       <div className="flex items-center justify-center h-64">
         <p className="text-sm text-destructive">You do not have permission to access this dashboard.</p>
@@ -1418,4 +1420,5 @@ export default function RoleDashboard() {
 // ── Alliance Dashboards (premium upgrade) ──
 import { AllianceManagerDashboard } from "@/components/alliance/AllianceManagerDashboard";
 import { AllianceExecutiveDashboard } from "@/components/alliance/AllianceExecutiveDashboard";
-
+import { AccountsExecutiveDashboard } from "@/components/finance/AccountsExecutiveDashboard";
+import { AccountsModule } from "@/components/finance/AccountsModule";
