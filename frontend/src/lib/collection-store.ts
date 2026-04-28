@@ -378,7 +378,7 @@ export function verifyCollection(
 ): Collection | null {
   const c = state.find(x => x.id === id);
   if (!c) return null;
-  if (c.status !== "Awaiting Verification" && c.status !== "Mismatch") return null;
+  if (c.status !== "Awaiting Verification" && c.status !== "Mismatch" && c.status !== "Collected") return null;
   const prev = c.status;
   const matches = Math.abs(input.verifiedAmount - c.amount) < 0.5;
   c.verifiedAmount = input.verifiedAmount;

@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import {
   Campaign, CampaignPlatform, CampaignObjective, CampaignApprovalStatus,
-  AudienceType, RetargetingSource, AdType, AdSet, AdCreative, LandingPage, UTMTracking, Lead, Admission,
+  AudienceType, RetargetingSource, AdType, AdSet, AdCreative, LandingPage, UTMTracking, Lead, Admission, User,
 } from "@/lib/types";
 import { MASTER_LOCATIONS, MASTER_COURSE_NAMES } from "@/lib/master-schema";
 import { useAuth } from "@/lib/auth-context";
@@ -15,6 +15,7 @@ import {
   updateMarketingCampaign,
 } from "@/lib/marketing-api";
 import { MarketingLeadForm } from "@/components/MarketingLeadForm";
+import { fetchTelecallingUsers } from "@/lib/telecalling-api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -292,27 +293,30 @@ export default function CampaignsPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [admissions, setAdmissions] = useState<Admission[]>([]);
   const [loading, setLoading] = useState(true);
+  const [users, setUsers] = useState<User[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [leadFormOpen, setLeadFormOpen] = useState(false);
   const [adSetDialog, setAdSetDialog] = useState<string | null>(null);
   const [detailCampaign, setDetailCampaign] = useState<Campaign | null>(null);
   const [view, setView] = useState<"dashboard" | "list">("dashboard");
-  const { currentUser, allUsers } = useAuth();
+  const { currentUser } = useAuth();
 
   useEffect(() => {
     let active = true;
     const load = async () => {
       setLoading(true);
       try {
-        const [campaignRows, leadRows, admissionRows] = await Promise.all([
+        const [campaignRows, leadRows, admissionRows, userRows] = await Promise.all([
           fetchMarketingCampaigns(),
           fetchMarketingLeads(),
           fetchMarketingAdmissions(),
+          fetchTelecallingUsers(),
         ]);
         if (!active) return;
         setCampaigns(campaignRows);
         setLeads(leadRows);
         setAdmissions(admissionRows);
+        setUsers(userRows);
         store.saveCampaigns(campaignRows);
         store.saveLeads(leadRows);
         store.saveAdmissions(admissionRows);
@@ -439,7 +443,7 @@ export default function CampaignsPage() {
                 onCancel={() => setLeadFormOpen(false)}
                 creatorName={currentUser?.name || "Marketing"}
                 campaigns={campaigns}
-                users={allUsers}
+                users={users}
                 existingLeads={leads}
               />
             </DialogContent>

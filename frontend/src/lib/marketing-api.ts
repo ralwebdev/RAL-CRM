@@ -244,3 +244,23 @@ export async function fetchMarketingAdmissions(): Promise<Admission[]> {
   const items = Array.isArray(response.data) ? response.data : [];
   return items.map(mapAdmissionFromApi);
 }
+
+export async function createMarketingAdmission(admission: Admission): Promise<Admission> {
+  const payload = sanitizeObject({
+    ...admission,
+    id: undefined,
+    _id: undefined,
+  });
+  const response = await api.post("/api/admissions", payload);
+  return mapAdmissionFromApi(response.data);
+}
+
+export async function updateMarketingAdmission(id: string, patch: Partial<Admission>): Promise<Admission> {
+  const payload = sanitizeObject({
+    ...patch,
+    id: undefined,
+    _id: undefined,
+  });
+  const response = await api.put(`/api/admissions/${id}`, payload);
+  return mapAdmissionFromApi(response.data);
+}

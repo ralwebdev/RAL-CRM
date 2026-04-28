@@ -183,7 +183,7 @@ export function LogCollectionDialog({
       {
         id: currentUser?.id || "u0",
         name: currentUser?.name || (asAdmin ? "Admin" : "Counselor"),
-        role: currentUser?.role || (asAdmin ? "admin" : "counselor"),
+        role: asAdmin ? "admin" : (currentUser?.role || "counselor"),
       },
     );
     notifyCollectionLogged(c);

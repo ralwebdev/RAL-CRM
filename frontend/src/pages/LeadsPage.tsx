@@ -11,6 +11,7 @@ import {
 } from "@/lib/master-schema";
 import { useAuth } from "@/lib/auth-context";
 import { createMarketingLead, fetchMarketingCampaigns, fetchMarketingLeads, updateMarketingLead } from "@/lib/marketing-api";
+import { fetchTelecallingUsers } from "@/lib/telecalling-api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { StatCard } from "@/components/StatCard";
 import { Button } from "@/components/ui/button";
@@ -655,27 +656,29 @@ function LeadCreateForm({
 export default function LeadsPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [view, setView] = useState<"dashboard" | "pipeline" | "table">("dashboard");
-  const { currentUser, allUsers } = useAuth();
-  const users = allUsers;
+  const { currentUser } = useAuth();
 
   useEffect(() => {
     let active = true;
     const load = async () => {
       setLoading(true);
       try {
-        const [leadRows, campaignRows] = await Promise.all([
+        const [leadRows, campaignRows, userRows] = await Promise.all([
           fetchMarketingLeads(),
           fetchMarketingCampaigns(),
+          fetchTelecallingUsers(),
         ]);
         if (!active) return;
         setLeads(leadRows);
         setCampaigns(campaignRows);
+        setUsers(userRows);
       } catch (err: any) {
         if (!active) return;
         toast.error(err?.response?.data?.message || "Could not load leads from backend.");

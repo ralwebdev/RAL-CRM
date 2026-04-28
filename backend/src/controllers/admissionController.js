@@ -2,11 +2,9 @@ import Admission from '../models/Admission.js';
 
 export const getAdmissions = async (req, res) => {
   try {
-    let query = {};
-    if (req.user?.role === 'counselor') {
-      query.counselorId = req.user._id;
-    }
-    const admissions = await Admission.find(query);
+    // Shared visibility for admissions across CRM roles.
+    // Avoid over-filtering that can hide records after refresh.
+    const admissions = await Admission.find({});
     res.json(admissions);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -27,7 +25,14 @@ export const getAdmissionById = async (req, res) => {
 
 export const createAdmission = async (req, res) => {
   try {
-    const admission = new Admission(req.body);
+    const payload = { ...req.body };
+    // Ensure counselor-created admissions remain visible to the same counselor
+    // when GET /api/admissions applies role-based filtering.
+    if (!payload.counselorId && req.user?._id) {
+      payload.counselorId = req.user._id;
+    }
+
+    const admission = new Admission(payload);
     const createdAdmission = await admission.save();
     res.status(201).json(createdAdmission);
   } catch (error) {

@@ -19,6 +19,7 @@ import { Button as UiButton } from "@/components/ui/button";
 import { GraduationCap, IndianRupee, UserCheck, Plus, CreditCard, AlertCircle, CheckCircle2, User, Phone, Building2, CalendarClock, FileText, Receipt, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { createMarketingAdmission, fetchMarketingAdmissions, fetchMarketingLeads, updateMarketingAdmission, updateMarketingLead } from "@/lib/marketing-api";
 
 const PAYMENT_MODES: PaymentMode[] = [...MASTER_PAYMENT_MODES] as PaymentMode[];
 const PAYMENT_TYPES: PaymentType[] = ["Admission Fee", "Seat Booking", "Registration", "EMI"];
@@ -365,16 +366,46 @@ function PaymentForm({
 }
 
 export default function AdmissionsPage() {
-  const [admissions, setAdmissions] = useState<Admission[]>(store.getAdmissions());
+  const [admissions, setAdmissions] = useState<Admission[]>([]);
+  const [leads, setLeads] = useState(store.getLeads());
   const [createOpen, setCreateOpen] = useState(false);
   const [paymentDialogAdm, setPaymentDialogAdm] = useState<Admission | null>(null);
-  const [selectedAdm, setSelectedAdm] = useState<Admission | null>(admissions[0] || null);
+  const [selectedAdm, setSelectedAdm] = useState<Admission | null>(null);
   const [newPaymentIds, setNewPaymentIds] = useState<Set<string>>(new Set());
   const [autoPiAdm, setAutoPiAdm] = useState<Admission | null>(null);
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-  const leads = store.getLeads();
-  const qualifiedLeads = leads.filter((l) => l.status === "Admission" || l.status === "Qualified");
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const [leadRows, admissionRows] = await Promise.all([
+          fetchMarketingLeads(),
+          fetchMarketingAdmissions(),
+        ]);
+        if (!active) return;
+        setLeads(leadRows);
+        setAdmissions(admissionRows);
+        setSelectedAdm(admissionRows[0] || null);
+        store.saveLeads(leadRows);
+        store.saveAdmissions(admissionRows);
+      } catch (err: any) {
+        if (!active) return;
+        toast.error(err?.response?.data?.message || "Could not load admissions data from backend.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    void load();
+    return () => { active = false; };
+  }, []);
+
+  const qualifiedLeads = leads.filter((l) => {
+    const s = String(l.status || "").trim().toLowerCase();
+    return s === "qualified" || s === "admission";
+  });
 
   const [form, setForm] = useState({
     leadId: "", courseSelected: "", batch: "", admissionDate: "", totalFee: "",
@@ -382,7 +413,7 @@ export default function AdmissionsPage() {
     parentName: "", parentPhone: "", studentBankName: "", parentBankName: "",
   });
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     const lead = leads.find((l) => l.id === form.leadId);
     if (!lead) return;
     const newAdm: Admission = {
@@ -409,31 +440,45 @@ export default function AdmissionsPage() {
       parentBankName: form.parentBankName,
       createdAt: new Date().toISOString().split("T")[0],
     };
-    const updated = [...admissions, newAdm];
-    setAdmissions(updated);
-    store.saveAdmissions(updated);
+    try {
+      const created = await createMarketingAdmission(newAdm);
+      const updated = [...admissions, created];
+      setAdmissions(updated);
+      setSelectedAdm(created);
+      store.saveAdmissions(updated);
 
-    const updatedLeads = leads.map((l) => l.id === form.leadId ? { ...l, status: "Admission" as const } : l);
-    store.saveLeads(updatedLeads);
+      const updatedLead = await updateMarketingLead(form.leadId, { status: "Admission" as const });
+      const updatedLeads = leads.map((l) => l.id === updatedLead.id ? updatedLead : l);
+      setLeads(updatedLeads);
+      store.saveLeads(updatedLeads);
 
-    setForm({ leadId: "", courseSelected: "", batch: "", admissionDate: "", totalFee: "", paymentStatus: "Pending", parentName: "", parentPhone: "", studentBankName: "", parentBankName: "" });
-    setCreateOpen(false);
-    toast.success("Admission created successfully.");
-    // Auto-PI prompt: open prefilled PI dialog after admission confirmation
-    setAutoPiAdm(newAdm);
+      setForm({ leadId: "", courseSelected: "", batch: "", admissionDate: "", totalFee: "", paymentStatus: "Pending", parentName: "", parentPhone: "", studentBankName: "", parentBankName: "" });
+      setCreateOpen(false);
+      toast.success("Admission created successfully.");
+      // Auto-PI prompt: open prefilled PI dialog after admission confirmation
+      setAutoPiAdm(created);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to create admission.");
+      return;
+    }
   };
 
-  const handlePaymentSave = (updated: Admission) => {
+  const handlePaymentSave = async (updated: Admission) => {
     const newHistory = updated.paymentHistory;
     const lastEntry = newHistory[newHistory.length - 1];
-    const all = admissions.map((a) => (a.id === updated.id ? updated : a));
-    setAdmissions(all);
-    store.saveAdmissions(all);
-    setSelectedAdm(updated);
-    setPaymentDialogAdm(null);
-    if (lastEntry) {
-      setNewPaymentIds((prev) => new Set(prev).add(lastEntry.id));
-      setTimeout(() => setNewPaymentIds((prev) => { const n = new Set(prev); n.delete(lastEntry.id); return n; }), 1600);
+    try {
+      const saved = await updateMarketingAdmission(updated.id, updated);
+      const all = admissions.map((a) => (a.id === saved.id ? saved : a));
+      setAdmissions(all);
+      store.saveAdmissions(all);
+      setSelectedAdm(saved);
+      setPaymentDialogAdm(null);
+      if (lastEntry) {
+        setNewPaymentIds((prev) => new Set(prev).add(lastEntry.id));
+        setTimeout(() => setNewPaymentIds((prev) => { const n = new Set(prev); n.delete(lastEntry.id); return n; }), 1600);
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to save payment update.");
     }
   };
 
@@ -447,6 +492,7 @@ export default function AdmissionsPage() {
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-foreground">Admissions</h1>
           <p className="text-xs sm:text-sm text-muted-foreground">Convert qualified leads into student records</p>
+          {loading && <p className="text-[11px] text-muted-foreground mt-1">Loading from backend...</p>}
         </div>
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
           <DialogTrigger asChild>
@@ -548,7 +594,7 @@ export default function AdmissionsPage() {
                 <th className="p-4 font-medium">Batch</th>
                 <th className="p-4 font-medium">Fee</th>
                 <th className="p-4 font-medium">Payment</th>
-                <th className="p-4 font-medium">Actions</th>
+                {/* <th className="p-4 font-medium">Actions</th> */}
               </tr>
             </thead>
             <tbody>
@@ -566,17 +612,16 @@ export default function AdmissionsPage() {
                   <td className="p-4 text-muted-foreground">{a.batch}</td>
                   <td className="p-4 font-medium text-card-foreground">₹{a.totalFee.toLocaleString()}</td>
                   <td className="p-4">
-                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                      a.paymentStatus === "Paid" ? "bg-success/10 text-success" :
-                      a.paymentStatus === "Partial" ? "bg-warning/10 text-warning" :
-                      "bg-muted text-muted-foreground"
-                    }`}>{a.paymentStatus}</span>
+                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${a.paymentStatus === "Paid" ? "bg-success/10 text-success" :
+                        a.paymentStatus === "Partial" ? "bg-warning/10 text-warning" :
+                          "bg-muted text-muted-foreground"
+                      }`}>{a.paymentStatus}</span>
                   </td>
-                  <td className="p-4">
+                  {/* <td className="p-4">
                     <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setPaymentDialogAdm(a); }}>
                       <CreditCard className="mr-1 h-3.5 w-3.5" />Pay
                     </Button>
-                  </td>
+                  </td> */}
                 </tr>
               ))}
               {admissions.length === 0 && (

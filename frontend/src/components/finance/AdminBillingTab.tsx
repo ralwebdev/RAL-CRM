@@ -115,9 +115,7 @@ export function AdminBillingTab() {
       c.invoiceRequest?.status === "awaiting_admin_review"
     ),
   );
-  const myCollections = items.filter(c =>
-    c.collectorRole === "admin" && c.collectedById === actor.id,
-  );
+  const myCollections = items.filter(c => c.collectorRole === "admin");
   const verifiedToAccounts = items.filter(c =>
     c.invoiceRequest && [
       "awaiting_accounts", "draft_prepared", "issued",
