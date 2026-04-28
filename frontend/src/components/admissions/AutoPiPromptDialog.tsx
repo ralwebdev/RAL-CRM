@@ -13,7 +13,7 @@ import { FileText, Sparkles, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import type { Admission } from "@/lib/types";
 import { useAuth } from "@/lib/auth-context";
-import { createInvoice } from "@/lib/finance-store";
+import { createInvoiceAsync } from "@/lib/finance-store";
 import { computeBreakup } from "@/lib/gst-calc";
 import { findOpenPiForStudent } from "@/lib/pi-helpers";
 import { notifyHighValuePi } from "@/lib/pi-ti-notifications";
@@ -45,10 +45,10 @@ export function AutoPiPromptDialog({ admission, open, onClose }: Props) {
 
   if (!admission) return null;
 
-  const submit = () => {
+  const submit = async () => {
     if (fee <= 0) { toast.error("Enter a valid fee amount."); return; }
     if (!breakup) return;
-    const inv = createInvoice({
+    const inv = await createInvoiceAsync({
       invoiceType: "PI",
       customerId: admission.id,
       customerName: admission.studentName,
@@ -62,7 +62,7 @@ export function AutoPiPromptDialog({ admission, open, onClose }: Props) {
       gstType: "Taxable",
       gstRate: 18,
       notes: `Auto-generated on admission confirmation · Batch: ${admission.batch}`,
-    } as Parameters<typeof createInvoice>[0], currentUser?.id || "u0");
+    } as Parameters<typeof createInvoiceAsync>[0], currentUser?.id || "u0");
 
     inv.cgst = breakup.cgst;
     inv.sgst = breakup.sgst;
