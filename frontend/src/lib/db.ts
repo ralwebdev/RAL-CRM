@@ -13,7 +13,7 @@ const getStorage = (): Storage | null => {
 };
 
 const memoryStore = new Map<string, string>();
-const canPersist = (key: string) => key === TOKEN_STORAGE_KEY;
+const canPersist = (key: string) => !SESSION_STORAGE_KEYS.includes(key as (typeof SESSION_STORAGE_KEYS)[number]);
 
 const parseJSON = <T>(raw: string | null): T | undefined => {
   if (!raw) return undefined;

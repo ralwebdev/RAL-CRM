@@ -456,10 +456,17 @@ function MyCollectionsTab({
   items, actor, onLog,
 }: { items: Collection[]; actor: { id: string; name: string; role: string }; onLog: () => void }) {
   const selfVerify = (c: Collection) => {
-    verifyCollection(c.id, {
+    const updated = verifyCollection(c.id, {
       verifiedAmount: c.amount, verificationMode: "cash_in_hand",
       remarks: "Self-verified by admin",
     }, actor);
+    if (!updated) {
+      toast.error(`Could not self-verify ${c.receiptRef}.`);
+      return;
+    }
+    if (c.invoiceRequest?.status === "awaiting_admin_review") {
+      adminApproveInvoiceRequest(c.id, actor, "Self-verified by admin");
+    }
     toast.success(`${c.receiptRef} self-verified.`);
   };
 

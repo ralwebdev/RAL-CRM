@@ -272,6 +272,7 @@ export async function hydrateCollectionsFromBackend(): Promise<void> {
       const entryId = String(entry?._id || `${studentId}_${hIdx}`);
       const collectedAt = entry?.paymentDate ? new Date(entry.paymentDate).toISOString() : new Date().toISOString();
       const amount = Number(entry?.amountPaid || 0);
+      const referenceNo = entry?.referenceNumber ? String(entry.referenceNumber).trim() : "";
       const modeRaw = String(entry?.paymentMode || "").toLowerCase();
       const mode: CollectionMode =
         modeRaw.includes("upi") ? "upi" :
@@ -280,9 +281,12 @@ export async function hydrateCollectionsFromBackend(): Promise<void> {
         modeRaw.includes("card") ? "card" :
         "cash";
 
+      const stableKeyRaw = referenceNo || `${studentId}|${collectedAt.slice(0, 10)}|${amount}|${hIdx}`;
+      const stableKey = stableKeyRaw.replace(/[^a-zA-Z0-9|_-]/g, "_");
+
       return {
-        id: `api_col_${entryId}`,
-        receiptRef: `RC-${new Date(collectedAt).getFullYear()}-${String(hIdx + 1).padStart(4, "0")}`,
+        id: `api_col_${stableKey}`,
+        receiptRef: referenceNo || `RC-${new Date(collectedAt).getFullYear()}-${String(hIdx + 1).padStart(4, "0")}`,
         studentId,
         studentName,
         studentMobile,
@@ -296,7 +300,7 @@ export async function hydrateCollectionsFromBackend(): Promise<void> {
         collectedByName: "Backend Sync",
         collectorRole: "admin",
         status: "Collected",
-        txnId: entry?.referenceNumber ? String(entry.referenceNumber) : undefined,
+        txnId: referenceNo || undefined,
         invoiceRequest: { type: "none", status: "none" },
         audit: [],
         createdAt: collectedAt,
@@ -306,11 +310,39 @@ export async function hydrateCollectionsFromBackend(): Promise<void> {
 
   if (backendCollections.length > 0) {
     const existingById = new Map(state.map((c) => [c.id, c]));
-    backendCollections.forEach((c) => {
-      if (!existingById.has(c.id)) {
-        existingById.set(c.id, c);
+    const existingByReceipt = new Map(
+      state
+        .filter((c) => !!c.receiptRef)
+        .map((c) => [String(c.receiptRef).trim().toLowerCase(), c]),
+    );
+
+    backendCollections.forEach((incoming) => {
+      const receiptKey = String(incoming.receiptRef || "").trim().toLowerCase();
+      const matched = existingById.get(incoming.id) || (receiptKey ? existingByReceipt.get(receiptKey) : undefined);
+      if (!matched) {
+        existingById.set(incoming.id, incoming);
+        return;
       }
+
+      // Preserve local workflow/progress and local-entered metadata.
+      // Backend refresh should not regress admin verification state.
+      const preserved: Collection = {
+        ...incoming,
+        ...matched,
+        id: matched.id,
+        // Refresh mutable source-of-truth student/payment fields from backend while
+        // keeping local workflow and admin metadata untouched.
+        studentName: incoming.studentName || matched.studentName,
+        studentMobile: incoming.studentMobile || matched.studentMobile,
+        courseName: incoming.courseName || matched.courseName,
+        branch: incoming.branch || matched.branch,
+        amount: incoming.amount || matched.amount,
+        mode: incoming.mode || matched.mode,
+        txnId: incoming.txnId || matched.txnId,
+      };
+      existingById.set(matched.id, preserved);
     });
+
     save(Array.from(existingById.values()));
   }
 }

@@ -35,6 +35,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell, AreaChart, Area
 } from "recharts";
+import { TeleCallerManagerDashboard } from "@/components/telecalling/TeleCallerManagerDashboard";
 
 /* ═══════════════════════════════════════════════════════════════
    CONSTANTS
@@ -91,6 +92,10 @@ function outcomeBg(o: CallOutcome) {
    ═══════════════════════════════════════════════════════════════ */
 export default function TelecallingPage() {
   const { currentUser: authUser, allUsers: authUsers } = useAuth();
+  if (authUser?.role === "admin" || authUser?.role === "owner") {
+    return <TeleCallerManagerDashboard />;
+  }
+
   const [users, setUsers] = useState<AppUser[]>(authUsers);
   const [callLogs, setCallLogs] = useState<CallLog[]>([]);
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
