@@ -1335,6 +1335,8 @@ function AdminDashboard() {
   const leads = store.getLeads();
   const admissions = store.getAdmissions();
   const campaigns = store.getCampaigns();
+  const callLogs = store.getCallLogs();
+  const followUps = store.getFollowUps();
   const [users, setUsers] = useState(store.getUsers());
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [error, setError] = useState("");
@@ -1421,6 +1423,30 @@ function AdminDashboard() {
     }
   };
 
+  const telecallerRows = useMemo(() => {
+    const telecallers = users.filter((u) => u.role === "telecaller");
+    return telecallers.map((tc) => {
+      const assignedLeads = leads.filter((l) => l.assignedTelecallerId === tc.id);
+      const tcLogs = callLogs.filter((c) => c.telecallerId === tc.id);
+      const connectedCalls = tcLogs.filter((c) => c.outcome === "Connected" || c.outcome === "Interested").length;
+      const pendingFollowUps = followUps.filter((f) => f.assignedTo === tc.id && !f.completed).length;
+      const admissionsCount = admissions.filter((a) => {
+        const lead = leads.find((l) => l.id === a.leadId);
+        return lead?.assignedTelecallerId === tc.id;
+      }).length;
+      return {
+        id: tc.id,
+        name: tc.name,
+        email: tc.email,
+        assignedLeads: assignedLeads.length,
+        calls: tcLogs.length,
+        connectedCalls,
+        pendingFollowUps,
+        admissionsCount,
+      };
+    });
+  }, [users, leads, callLogs, followUps, admissions]);
+
   return (
     <div className="space-y-6">
       <div>
@@ -1432,6 +1458,45 @@ function AdminDashboard() {
         <StatCard title="Active Leads" value={leads.filter((l) => l.status !== "Lost" && l.status !== "Admission").length} icon={<Activity className="h-5 w-5" />} />
         <StatCard title="Admissions" value={admissions.length} icon={<GraduationCap className="h-5 w-5" />} />
         <StatCard title="Campaigns" value={campaigns.length} icon={<Megaphone className="h-5 w-5" />} />
+      </div>
+
+      <div className="rounded-xl bg-card p-5 shadow-card">
+        <h3 className="mb-4 text-sm font-semibold text-card-foreground flex items-center gap-2">
+          <PhoneCall className="h-4 w-4" /> Telecaller Consolidated View
+        </h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-muted-foreground">
+                <th className="pb-2 font-medium">Telecaller</th>
+                <th className="pb-2 font-medium text-center">Assigned Leads</th>
+                <th className="pb-2 font-medium text-center">Calls Logged</th>
+                <th className="pb-2 font-medium text-center">Connected</th>
+                <th className="pb-2 font-medium text-center">Pending Follow-ups</th>
+                <th className="pb-2 font-medium text-center">Admissions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {telecallerRows.length === 0 ? (
+                <tr>
+                  <td className="py-4 text-muted-foreground text-center" colSpan={6}>No telecallers found.</td>
+                </tr>
+              ) : telecallerRows.map((r) => (
+                <tr key={r.id} className="border-b last:border-0">
+                  <td className="py-2.5">
+                    <p className="font-medium text-card-foreground">{r.name}</p>
+                    <p className="text-xs text-muted-foreground">{r.email}</p>
+                  </td>
+                  <td className="py-2.5 text-center">{r.assignedLeads}</td>
+                  <td className="py-2.5 text-center">{r.calls}</td>
+                  <td className="py-2.5 text-center">{r.connectedCalls}</td>
+                  <td className="py-2.5 text-center">{r.pendingFollowUps}</td>
+                  <td className="py-2.5 text-center">{r.admissionsCount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* User management */}
