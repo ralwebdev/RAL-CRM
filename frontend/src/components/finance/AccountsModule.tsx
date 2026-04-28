@@ -37,6 +37,7 @@ import { buildVouchers, vouchersToCsv, vouchersToJson, downloadFile, type TxnTyp
 import { submitExpenseForApproval, approvalForExpense, syncApprovalToExpense, tierForAmount } from "@/lib/expense-approval-bridge";
 import { approvalStore } from "@/lib/approvals";
 import type { UserRole } from "@/lib/types";
+import { hydrateCollectionsFromBackend } from "@/lib/collection-store";
 import { InvoiceDispatchDialog } from "./InvoiceDispatchDialog";
 import {
   getDispatches, subscribeDispatch, dispatchForInvoice, registerDispatch, recordSend,
@@ -120,6 +121,7 @@ export function AccountsModule() {
 
   useEffect(() => {
     void hydrateFinanceFromBackend().catch(() => { });
+    void hydrateCollectionsFromBackend().catch(() => { });
     recomputeOverdue();
     autoSeedEmisForPartial();
     scanPiDueAlerts(getFinance().invoices);
@@ -507,6 +509,13 @@ function BillingTab({ role }: { role: RoleScope }) {
     toast({ title: `${targets.length} fee-due reminders queued`, description: "Overdue invoices dispatched via email." });
   };
 
+  const paidFromLinkedInvoices = (invoice: Invoice) => {
+    if ((invoice.invoiceType ?? "PI") !== "PI") return invoice.amountPaid;
+    return fin.invoices
+      .filter((inv) => inv.invoiceType === "TI" && inv.linkedPiId === invoice.id)
+      .reduce((sum, inv) => sum + inv.total, 0);
+  };
+
   const cols: Column<Invoice>[] = [
     {
       key: "type", header: "Type",
@@ -544,7 +553,13 @@ function BillingTab({ role }: { role: RoleScope }) {
       sortValue: r => r.dueDate, exportValue: r => r.invoiceType === "TI" ? "" : fmtDate(r.dueDate),
     },
     { key: "total", header: "Amount", render: r => <span className="font-semibold tabular-nums">{fmtINR(r.total)}</span>, sortValue: r => r.total, exportValue: r => r.total },
-    { key: "paid", header: "Paid", render: r => <span className="tabular-nums text-emerald-700">{fmtINR(r.amountPaid)}</span>, sortValue: r => r.amountPaid, exportValue: r => r.amountPaid },
+    {
+      key: "paid",
+      header: "Paid",
+      render: r => <span className="tabular-nums text-emerald-700">{fmtINR(paidFromLinkedInvoices(r))}</span>,
+      sortValue: r => paidFromLinkedInvoices(r),
+      exportValue: r => paidFromLinkedInvoices(r),
+    },
     { key: "status", header: "Status", render: r => <StatusPill status={r.status} tone={statusTone(r.status)} />, exportValue: r => r.status },
     {
       key: "actions", header: "",

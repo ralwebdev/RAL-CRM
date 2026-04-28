@@ -38,6 +38,7 @@ import { useAuth } from "@/lib/auth-context";
 import {
   getCollections, subscribeCollections,
   verifyCollection, rejectCollection,
+  requestInvoice,
   adminApproveInvoiceRequest, adminRejectInvoiceRequest,
   accountsHoldRequest,
   hydrateCollectionsFromBackend,
@@ -462,6 +463,22 @@ function MyCollectionsTab({
     toast.success(`${c.receiptRef} self-verified.`);
   };
 
+  const canRequestTi = (c: Collection) => {
+    const verified = c.status === "Verified" || c.status === "Ready For Invoice" || c.status === "Invoice Generated";
+    if (!verified) return false;
+    const req = c.invoiceRequest;
+    if (!req || req.type === "none" || req.status === "none" || req.status === "rejected") return true;
+    if (req.type === "TI" && ["awaiting_accounts", "draft_prepared", "issued", "on_hold", "clarification_requested"].includes(req.status)) return false;
+    if (req.status === "awaiting_admin_review") return false;
+    return true;
+  };
+
+  const requestTi = (c: Collection) => {
+    if (!canRequestTi(c)) return;
+    requestInvoice(c.id, "TI", actor);
+    toast.success(`Generate TI request sent for ${c.receiptRef}.`);
+  };
+
   return (
     <Card className="p-0 overflow-x-auto">
       <div className="p-3 border-b text-[11px] text-muted-foreground bg-muted/30 flex items-center justify-between gap-2">
@@ -515,6 +532,17 @@ function MyCollectionsTab({
                   {!verified && (
                     <Button size="sm" className="h-7 text-xs" onClick={() => selfVerify(c)}>
                       <CheckCircle2 className="h-3 w-3 mr-1" /> Self-verify
+                    </Button>
+                  )}
+                  {verified && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      onClick={() => requestTi(c)}
+                      disabled={!canRequestTi(c)}
+                    >
+                      Generate TI Request
                     </Button>
                   )}
                 </TableCell>

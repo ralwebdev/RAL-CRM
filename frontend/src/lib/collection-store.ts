@@ -181,6 +181,7 @@ type Listener = () => void;
 const listeners = new Set<Listener>();
 
 const uid = (p: string) => `${p}_${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-4)}`;
+const objectIdRegex = /^[a-fA-F0-9]{24}$/;
 
 function load(): Collection[] {
   return db.readSync<Collection[]>(KEY, seed()) ?? seed();
@@ -205,6 +206,55 @@ export function subscribeCollections(l: Listener) {
 
 export function getCollections(): Collection[] { return state; }
 export function resetCollections() { save(seed()); }
+
+async function persistCollectionToAdmissionHistory(c: Collection): Promise<void> {
+  // Only persist when we can confidently map to an Admission document id.
+  if (!objectIdRegex.test(c.studentId)) return;
+  try {
+    const admissionRes = await api.get(`/api/admissions/${c.studentId}`);
+    const admission = admissionRes.data || {};
+    const history = Array.isArray(admission.paymentHistory) ? admission.paymentHistory : [];
+    const exists = history.some((h: any) =>
+      String(h?.referenceNumber || "").trim() === c.receiptRef,
+    );
+    if (exists) return;
+
+    const paymentModeMap: Record<CollectionMode, string> = {
+      cash: "Cash",
+      upi: "UPI",
+      bank_transfer: "Online Transfer",
+      cheque: "Cheque",
+      card: "Online Transfer",
+    };
+
+    const paymentTypeMap: Record<CollectionReason, string> = {
+      admission_fee: "Admission Fee",
+      registration_fee: "Registration",
+      seat_booking: "Seat Booking",
+      emi_payment: "EMI",
+      emi_late_fine: "EMI",
+      id_card_charge: "Registration",
+      rfid_charge: "Registration",
+      stationery_sale: "Registration",
+      misc_approved_charge: "Registration",
+    };
+
+    const paymentEntry = {
+      paymentDate: c.collectedAt,
+      amountPaid: c.amount,
+      paymentMode: paymentModeMap[c.mode] || "Cash",
+      referenceNumber: c.receiptRef,
+      paymentType: paymentTypeMap[c.reason] || "Registration",
+      emiNumber: c.emiInstallmentNo ?? null,
+    };
+
+    await api.put(`/api/admissions/${c.studentId}`, {
+      paymentHistory: [...history, paymentEntry],
+    });
+  } catch {
+    // Keep UI flow non-blocking; backend persistence is best-effort.
+  }
+}
 
 export async function hydrateCollectionsFromBackend(): Promise<void> {
   const response = await api.get("/api/admissions");
@@ -344,6 +394,7 @@ export function logCollection(
     });
   }
   save([c, ...state]);
+  void persistCollectionToAdmissionHistory(c);
   return c;
 }
 
