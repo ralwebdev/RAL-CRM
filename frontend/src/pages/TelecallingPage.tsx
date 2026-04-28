@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { store } from "@/lib/mock-data";
 import { CallLog, CallOutcome, Lead, LeadStatus, Admission, FollowUp, NotInterestedReason, FollowUpType, ConversationInsight, User as AppUser } from "@/lib/types";
 import { fetchMarketingAdmissions, fetchMarketingLeads, updateMarketingLead } from "@/lib/marketing-api";
 import {
@@ -118,6 +119,12 @@ export default function TelecallingPage() {
         setCallLogs(callLogRows);
         setFollowUps(followUpRows);
         setUsers(userRows.length > 0 ? userRows : authUsers);
+        // Keep shared dashboard store aligned with telecalling backend reads.
+        store.saveLeads(leadRows);
+        store.saveAdmissions(admissionRows);
+        store.saveCallLogs(callLogRows);
+        store.saveFollowUps(followUpRows);
+        store.saveUsers(userRows.length > 0 ? userRows : authUsers);
       } catch (err) {
         if (!active) return;
         setUsers(authUsers);
@@ -333,7 +340,11 @@ export default function TelecallingPage() {
     };
     try {
       const createdLog = await createTelecallingCallLog(newLog);
-      setCallLogs((prev) => [...prev, createdLog]);
+      setCallLogs((prev) => {
+        const next = [...prev, createdLog];
+        store.saveCallLogs(next);
+        return next;
+      });
 
       // If walk-in scheduled, update lead
       if (outcomeForm.scheduleWalkIn && outcomeForm.walkInDate) {
@@ -359,7 +370,11 @@ export default function TelecallingPage() {
             ],
           };
           const savedLead = await updateMarketingLead(currentLead.id, patchedLead);
-          setLeads((prev) => prev.map((l) => (l.id === savedLead.id ? savedLead : l)));
+          setLeads((prev) => {
+            const next = prev.map((l) => (l.id === savedLead.id ? savedLead : l));
+            store.saveLeads(next);
+            return next;
+          });
         }
       }
 
@@ -375,7 +390,11 @@ export default function TelecallingPage() {
           createdAt: today,
           followUpType: (outcomeForm.followUpType as FollowUpType) || undefined,
         });
-        setFollowUps((prev) => [...prev, createdFU]);
+        setFollowUps((prev) => {
+          const next = [...prev, createdFU];
+          store.saveFollowUps(next);
+          return next;
+        });
         showToast(outcomeForm.scheduleWalkIn ? "Walk-in counseling scheduled successfully." : "Call outcome recorded. Follow-up added to your task queue.");
       } else {
         showToast(outcomeForm.scheduleWalkIn ? "Walk-in counseling scheduled successfully." : "Call outcome recorded successfully.");

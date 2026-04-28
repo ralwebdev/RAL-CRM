@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useAuth } from "@/lib/auth-context";
 import {
   getFinance, subscribeFinance, recomputeOverdue,
@@ -37,7 +37,7 @@ import { buildVouchers, vouchersToCsv, vouchersToJson, downloadFile, type TxnTyp
 import { submitExpenseForApproval, approvalForExpense, syncApprovalToExpense, tierForAmount } from "@/lib/expense-approval-bridge";
 import { approvalStore } from "@/lib/approvals";
 import type { UserRole } from "@/lib/types";
-import { hydrateCollectionsFromBackend } from "@/lib/collection-store";
+import { getCollections, hydrateCollectionsFromBackend, subscribeCollections, type Collection } from "@/lib/collection-store";
 import { InvoiceDispatchDialog } from "./InvoiceDispatchDialog";
 import {
   getDispatches, subscribeDispatch, dispatchForInvoice, registerDispatch, recordSend,
@@ -80,6 +80,14 @@ function useDispatchList() {
   );
 }
 
+function useCollections() {
+  return useSyncExternalStore(
+    subscribeCollections,
+    getCollections,
+    getCollections,
+  );
+}
+
 type RoleScope = "owner" | "manager" | "executive";
 
 function scope(role: string): RoleScope {
@@ -119,13 +127,41 @@ export function AccountsModule() {
   const tabs = ALL_TABS.filter(t => t.roles.includes(role));
   const [tab, setTab] = useState(tabs[0].id);
 
-  useEffect(() => {
-    void hydrateFinanceFromBackend().catch(() => { });
-    void hydrateCollectionsFromBackend().catch(() => { });
+  const syncAllData = useCallback(async () => {
+    await Promise.allSettled([
+      hydrateFinanceFromBackend(),
+      hydrateCollectionsFromBackend(),
+    ]);
     recomputeOverdue();
     autoSeedEmisForPartial();
     scanPiDueAlerts(getFinance().invoices);
   }, []);
+
+  useEffect(() => {
+    void syncAllData();
+
+    const onFocus = () => { void syncAllData(); };
+    window.addEventListener("focus", onFocus);
+
+    const intervalId = window.setInterval(() => {
+      void syncAllData();
+    }, 30000);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.clearInterval(intervalId);
+    };
+  }, [syncAllData]);
+
+  useEffect(() => {
+    void syncAllData();
+  }, [tab, syncAllData]);
+
+  useEffect(() => {
+    if (!tabs.some((t) => t.id === tab)) {
+      setTab(tabs[0]?.id || "dashboard");
+    }
+  }, [tab, tabs]);
 
   // Admin gets a focused, single-tab Verification Control Center —
   // no duplicate Billing Chart, no invoice issuance surfaces.
@@ -182,6 +218,7 @@ export function AccountsModule() {
 /* ───────── Dashboard ───────── */
 function DashboardTab({ onJump }: { onJump: (id: string) => void }) {
   const fin = useFinance();
+  const collections = useCollections();
   const edits = useSyncExternalStore(subscribeInvoiceEdits, getInvoiceEdits, getInvoiceEdits);
   const todayKey = new Date().toDateString();
   const editsToday = edits.filter(e => new Date(e.at).toDateString() === todayKey).length;
@@ -193,7 +230,7 @@ function DashboardTab({ onJump }: { onJump: (id: string) => void }) {
   const totalBilled = fin.invoices.reduce((s, i) => s + i.total, 0);
   const piInvoices = fin.invoices.filter(i => i.invoiceType === "PI");
   const billingRaised = piInvoices.reduce((s, i) => s + i.total, 0);
-  const totalCollected = fin.payments.reduce((s, p) => s + p.amount, 0);
+  const totalCollected = collections.reduce((s, c) => s + c.amount, 0);
   const outstanding = fin.invoices.reduce((s, i) => s + (i.total - i.amountPaid), 0);
   const totalExpenses = fin.expenses.filter(e => e.status === "Approved").reduce((s, e) => s + e.total, 0);
   const netProfit = totalCollected - totalExpenses;
@@ -268,7 +305,7 @@ function DashboardTab({ onJump }: { onJump: (id: string) => void }) {
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <FinanceKpi label="Billing Raised" value={fmtINR(billingRaised)} hint={`${piInvoices.length} PI invoices`} tone="primary" icon={<FileText className="h-4 w-4" />} onClick={() => onJump("billing")} />
-        <FinanceKpi label="Cash Received" value={fmtINR(totalCollected)} hint={`${fin.payments.length} receipts`} tone="success" icon={<IndianRupee className="h-4 w-4" />} onClick={() => onJump("collections")} />
+        <FinanceKpi label="Cash Received" value={fmtINR(totalCollected)} hint={`${collections.length} collections`} tone="success" icon={<IndianRupee className="h-4 w-4" />} onClick={() => onJump("collections")} />
         <FinanceKpi label="Outstanding Dues" value={fmtINR(outstanding)} hint="All open invoices" tone="warning" icon={<AlertTriangle className="h-4 w-4" />} onClick={() => onJump("collections")} />
         <FinanceKpi label="Total Expenses" value={fmtINR(totalExpenses)} hint="Approved this period" tone="destructive" icon={<Receipt className="h-4 w-4" />} onClick={() => onJump("expenses")} />
         <FinanceKpi label="Net Profit" value={fmtINR(netProfit)} hint={netProfit >= 0 ? "In the green" : "Negative"} tone={netProfit >= 0 ? "success" : "destructive"} icon={<TrendingUp className="h-4 w-4" />} onClick={() => onJump("profit")} />
@@ -837,28 +874,32 @@ function Row({ k, v }: { k: string; v: React.ReactNode }) {
 
 /* ───────── Collections ───────── */
 function CollectionsTab({ role }: { role: RoleScope }) {
-  const fin = useFinance();
-  const cols: Column<Payment>[] = [
-    { key: "rcpt", header: "Receipt #", render: r => <span className="font-mono text-xs">{r.receiptNo}</span>, sortValue: r => r.receiptNo, exportValue: r => r.receiptNo },
-    { key: "cust", header: "Customer", render: r => r.customerName, sortValue: r => r.customerName, exportValue: r => r.customerName },
+  void role;
+  const collections = useCollections();
+  const rows = [...collections].sort((a, b) => new Date(b.collectedAt).getTime() - new Date(a.collectedAt).getTime());
+  const cols: Column<Collection>[] = [
+    { key: "rcpt", header: "Receipt #", render: r => <span className="font-mono text-xs">{r.receiptRef}</span>, sortValue: r => r.receiptRef, exportValue: r => r.receiptRef },
+    { key: "cust", header: "Student", render: r => r.studentName, sortValue: r => r.studentName, exportValue: r => r.studentName },
     { key: "amount", header: "Amount", render: r => <span className="font-semibold tabular-nums">{fmtINR(r.amount)}</span>, sortValue: r => r.amount, exportValue: r => r.amount },
-    { key: "mode", header: "Mode", render: r => <Badge variant="outline" className="text-[10px]">{r.mode}</Badge>, exportValue: r => r.mode },
-    { key: "ref", header: "Reference", render: r => <span className="font-mono text-xs">{r.reference || "—"}</span>, exportValue: r => r.reference || "" },
-    { key: "paid", header: "Paid On", render: r => fmtDate(r.paidOn), sortValue: r => r.paidOn, exportValue: r => fmtDate(r.paidOn) },
+    { key: "mode", header: "Mode", render: r => <Badge variant="outline" className="text-[10px]">{r.mode.replace(/_/g, " ")}</Badge>, exportValue: r => r.mode },
+    { key: "ref", header: "Reference", render: r => <span className="font-mono text-xs">{r.txnId || r.chequeNumber || "—"}</span>, exportValue: r => r.txnId || r.chequeNumber || "" },
+    { key: "paid", header: "Collected On", render: r => fmtDate(r.collectedAt), sortValue: r => r.collectedAt, exportValue: r => fmtDate(r.collectedAt) },
+    { key: "status", header: "Status", render: r => <Badge variant="outline" className="text-[10px]">{r.status}</Badge>, exportValue: r => r.status },
   ];
+
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {(["Cash", "Bank", "UPI", "Card"] as PaymentMode[]).map(m => {
-          const sum = fin.payments.filter(p => p.mode === m).reduce((s, p) => s + p.amount, 0);
-          return <FinanceKpi key={m} label={m} value={fmtINR(sum)} hint={`${fin.payments.filter(p => p.mode === m).length} txns`} />;
+        {(["cash", "upi", "bank_transfer", "card"] as const).map(m => {
+          const byMode = collections.filter(c => c.mode === m);
+          const sum = byMode.reduce((s, c) => s + c.amount, 0);
+          return <FinanceKpi key={m} label={m.replace("_", " ").toUpperCase()} value={fmtINR(sum)} hint={`${byMode.length} txns`} />;
         })}
       </div>
-      <FinanceTable rows={fin.payments} columns={cols} searchKeys={["receiptNo", "customerName", "reference"]} exportName="payments" />
+      <FinanceTable rows={rows} columns={cols} searchKeys={["receiptRef", "studentName", "referenceNo"]} exportName="collections" />
     </div>
   );
 }
-
 /* ───────── EMI ───────── */
 function EmiTab() {
   const fin = useFinance();
@@ -1504,3 +1545,4 @@ function ExportsTab() {
     </div>
   );
 }
+

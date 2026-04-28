@@ -463,6 +463,11 @@ function OwnerDashboard() {
   const followUps = store.getFollowUps();
   const courses = store.getCourses();
   const today = new Date().toISOString().split("T")[0];
+  const matchesUserRef = (value: unknown, user: { id: string; name: string }) => {
+    if (!value) return false;
+    const raw = String(value).trim().toLowerCase();
+    return raw === String(user.id).trim().toLowerCase() || raw === String(user.name).trim().toLowerCase();
+  };
 
   // ── Multi-Vertical Data ──
   const internshipAdmissions = store.getInternshipAdmissions();
@@ -548,11 +553,14 @@ function OwnerDashboard() {
   // ── Telecaller Performance ──
   const telecallers = users.filter((u) => u.role === "telecaller");
   const tcPerf = telecallers.map((tc) => {
-    const assigned = leads.filter((l) => l.assignedTelecallerId === tc.id);
-    const calls = callLogs.filter((cl) => cl.telecallerId === tc.id);
+    const assigned = leads.filter((l) => matchesUserRef(l.assignedTelecallerId, tc));
+    const calls = callLogs.filter((cl) => matchesUserRef(cl.telecallerId, tc));
     const connected = calls.filter((cl) => cl.outcome === "Connected" || cl.outcome === "Interested");
-    const walkIns = leads.filter((l) => l.assignedTelecallerId === tc.id && l.walkInStatus && l.walkInStatus !== "Not Scheduled");
-    const converted = admissions.filter((a) => { const lead = leads.find((l) => l.id === a.leadId); return lead?.assignedTelecallerId === tc.id; });
+    const walkIns = leads.filter((l) => matchesUserRef(l.assignedTelecallerId, tc) && l.walkInStatus && l.walkInStatus !== "Not Scheduled");
+    const converted = admissions.filter((a) => {
+      const lead = leads.find((l) => l.id === a.leadId);
+      return matchesUserRef(lead?.assignedTelecallerId, tc);
+    });
     const per100 = assigned.length > 0 ? +((converted.length / assigned.length) * 100).toFixed(1) : 0;
     return { name: tc.name, assigned: assigned.length, calls: calls.length, connected: connected.length, walkIns: walkIns.length, admissions: converted.length, per100 };
   });
@@ -560,9 +568,13 @@ function OwnerDashboard() {
   // ── Counselor Performance ──
   const counselors = users.filter((u) => u.role === "counselor");
   const counselorPerf = counselors.map((co) => {
-    const assigned = leads.filter((l) => l.assignedCounselor === co.id);
+    const assigned = leads.filter((l) => matchesUserRef(l.assignedCounselor, co));
     const walkIns = assigned.filter((l) => l.walkInStatus === "Completed");
-    const converted = admissions.filter((a) => { const lead = leads.find((l) => l.id === a.leadId); return lead?.assignedCounselor === co.id; });
+    const converted = admissions.filter((a) => {
+      if (matchesUserRef((a as any).counselorId, co)) return true;
+      const lead = leads.find((l) => l.id === a.leadId);
+      return matchesUserRef(lead?.assignedCounselor, co);
+    });
     const revenue = converted.reduce((s, a) => s + (a.totalFee || 0), 0);
     return { name: co.name, walkIns: walkIns.length, admissions: converted.length, revenue };
   });
@@ -1576,7 +1588,26 @@ export default function RoleDashboard() {
   useSyncExternalStore(subscribeStore, getStoreVersion, getStoreVersion);
 
   useEffect(() => {
-    void syncDashboardDataByRole(currentUser?.role).catch(() => { /* keep existing local data if sync fails */ });
+    let alive = true;
+    const syncNow = async () => {
+      if (!currentUser?.role || !alive) return;
+      await syncDashboardDataByRole(currentUser.role).catch(() => { /* keep existing local data if sync fails */ });
+    };
+
+    void syncNow();
+
+    const onFocus = () => { void syncNow(); };
+    window.addEventListener("focus", onFocus);
+
+    const intervalId = window.setInterval(() => {
+      void syncNow();
+    }, 30000);
+
+    return () => {
+      alive = false;
+      window.removeEventListener("focus", onFocus);
+      window.clearInterval(intervalId);
+    };
   }, [currentUser?.role]);
 
   if (!currentUser) {

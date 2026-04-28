@@ -67,6 +67,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
   const [editInstitution, setEditInstitution] = useState<Institution | null>(null);
   const [showInstForm, setShowInstForm] = useState(false);
   const [showVisitForm, setShowVisitForm] = useState(false);
+  const [showContactForm, setShowContactForm] = useState(false);
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [showProposalForm, setShowProposalForm] = useState(false);
   const [showEventForm, setShowEventForm] = useState(false);
@@ -78,6 +79,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
   useEffect(() => {
     if (initialAction !== "new") return;
     if (initialTab === "visits") setShowVisitForm(true);
+    else if (initialTab === "contacts") setShowContactForm(true);
     else if (initialTab === "tasks") setShowTaskForm(true);
     else if (initialTab === "proposals") setShowProposalForm(true);
     else if (initialTab === "events") setShowEventForm(true);
@@ -306,6 +308,30 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
       await refreshFromBackend(true);
     } catch (err: any) {
       toast.error(err?.response?.data?.message || "Failed to log visit.");
+    }
+  };
+
+  const saveContact = async (vals: Record<string, unknown>) => {
+    const inst = data.institutions.find((i) => i.name === vals.institution);
+    if (!inst) {
+      toast.error("Select a valid institution.");
+      return;
+    }
+
+    try {
+      await api.post("/api/alliances/contacts", {
+        institutionId: inst.id,
+        name: String(vals.name || ""),
+        designation: String(vals.designation || ""),
+        phone: String(vals.phone || ""),
+        email: String(vals.email || ""),
+        notes: String(vals.notes || ""),
+      });
+      toast.success("Institution contact added.");
+      setShowContactForm(false);
+      await refreshFromBackend(true);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to add contact.");
     }
   };
 
@@ -541,6 +567,14 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
     ...(scope === "manager" ? [{ key: "executive", label: "Executive", type: "select" as const, options: executiveOptions, required: true }] : []),
     { key: "summary", label: "Summary", type: "textarea", required: true, colSpan: 2 },
   ];
+  const contactFields: FieldConfig[] = [
+    { key: "institution", label: "Institution", type: "select", options: data.institutions.map((i) => i.name), required: true },
+    { key: "name", label: "Contact Name", type: "text", required: true },
+    { key: "designation", label: "Designation", type: "text", required: true },
+    { key: "phone", label: "Phone", type: "phone", required: true },
+    { key: "email", label: "Email", type: "email" },
+    { key: "notes", label: "Notes", type: "textarea", colSpan: 2 },
+  ];
   const taskFields: FieldConfig[] = [
     { key: "title", label: "Task Title", type: "text", required: true, colSpan: 2 },
     { key: "institution", label: "Institution", type: "select", options: data.institutions.map((i) => i.name) },
@@ -700,7 +734,13 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
 
         {/* â”€â”€ Contacts â”€â”€ */}
         <TabsContent value="contacts" className="mt-4">
-          <DataTable data={data.contacts} columns={contactColumns} searchable={(r) => `${r.name} ${r.designation} ${r.email}`} searchPlaceholder="Search contactsâ€¦" />
+          <DataTable
+            data={data.contacts}
+            columns={contactColumns}
+            searchable={(r) => `${r.name} ${r.designation} ${r.email}`}
+            searchPlaceholder="Search contactsâ€¦"
+            toolbar={<Button size="sm" onClick={() => setShowContactForm(true)}><Plus className="mr-1 h-4 w-4" /> Add Contact</Button>}
+          />
         </TabsContent>
 
         {/* â”€â”€ Visits â”€â”€ */}
@@ -839,6 +879,13 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Log Visit</DialogTitle></DialogHeader>
           <FormEngine fields={visitFields} initial={{ visitDate: todayIso(), status: "Completed", interestLevel: "Warm" }} onSubmit={saveVisit} onCancel={() => setShowVisitForm(false)} />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showContactForm} onOpenChange={setShowContactForm}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Add Institution Contact</DialogTitle></DialogHeader>
+          <FormEngine fields={contactFields} initial={{}} onSubmit={saveContact} onCancel={() => setShowContactForm(false)} />
         </DialogContent>
       </Dialog>
 
