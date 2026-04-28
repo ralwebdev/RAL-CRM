@@ -1,4 +1,5 @@
 import { SESSION_STORAGE_KEYS } from "./session";
+import { TOKEN_STORAGE_KEY } from "./session";
 
 type Updater<T> = (current: T | undefined) => T;
 
@@ -10,6 +11,9 @@ const getStorage = (): Storage | null => {
   if (typeof window === "undefined") return null;
   return window.localStorage;
 };
+
+const memoryStore = new Map<string, string>();
+const canPersist = (key: string) => key === TOKEN_STORAGE_KEY;
 
 const parseJSON = <T>(raw: string | null): T | undefined => {
   if (!raw) return undefined;
@@ -33,10 +37,15 @@ const preserveAndClear = (storage: Storage, keysToPreserve: string[]) => {
 
 export const db = {
   createSync<T>(key: string, value: T): T {
+    const payload = JSON.stringify(value);
+    if (!canPersist(key)) {
+      memoryStore.set(key, payload);
+      return value;
+    }
     const storage = getStorage();
     if (!storage) return value;
     try {
-      storage.setItem(key, JSON.stringify(value));
+      storage.setItem(key, payload);
     } catch {
       // ignore storage write failures in demo mode
     }
@@ -44,6 +53,10 @@ export const db = {
   },
 
   readSync<T>(key: string, fallback?: T): T | undefined {
+    if (!canPersist(key)) {
+      const parsed = parseJSON<T>(memoryStore.get(key) ?? null);
+      return parsed === undefined ? fallback : parsed;
+    }
     const storage = getStorage();
     if (!storage) return fallback;
     try {
@@ -61,6 +74,10 @@ export const db = {
   },
 
   deleteSync(key: string) {
+    if (!canPersist(key)) {
+      memoryStore.delete(key);
+      return;
+    }
     const storage = getStorage();
     if (!storage) return;
     try {
@@ -71,9 +88,10 @@ export const db = {
   },
 
   clearSync(options: ClearOptions = {}) {
+    memoryStore.clear();
     const storage = getStorage();
     if (!storage) return;
-    const preserve = new Set<string>([...SESSION_STORAGE_KEYS, ...(options.preserveKeys ?? [])]);
+    const preserve = new Set<string>([TOKEN_STORAGE_KEY, ...(options.preserveKeys ?? [])]);
     try {
       preserveAndClear(storage, Array.from(preserve));
     } catch {
@@ -89,11 +107,14 @@ export const db = {
 
   keysSync(): string[] {
     const storage = getStorage();
-    if (!storage) return [];
-    return Array.from({ length: storage.length }, (_, idx) => storage.key(idx)).filter((key): key is string => !!key);
+    const persisted = storage
+      ? Array.from({ length: storage.length }, (_, idx) => storage.key(idx)).filter((key): key is string => !!key)
+      : [];
+    return Array.from(new Set([...persisted, ...memoryStore.keys()]));
   },
 
   hasSync(key: string): boolean {
+    if (!canPersist(key)) return memoryStore.has(key);
     const storage = getStorage();
     if (!storage) return false;
     return storage.getItem(key) !== null;

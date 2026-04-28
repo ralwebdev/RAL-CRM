@@ -28,29 +28,6 @@ function FieldError({ msg }: { msg?: string }) {
   ) : null;
 }
 
-/**
- * Round-robin assignment: picks the telecaller with the fewest assigned leads.
- */
-function getNextTelecaller(users: User[], leads: Lead[]): string {
-  const telecallers = users.filter((u) => u.role === "telecaller");
-  if (telecallers.length === 0) return "";
-
-  const counts = new Map<string, number>();
-  telecallers.forEach((tc) => counts.set(tc.id, 0));
-  leads.forEach((l) => {
-    if (l.assignedTelecallerId && counts.has(l.assignedTelecallerId)) {
-      counts.set(l.assignedTelecallerId, (counts.get(l.assignedTelecallerId) || 0) + 1);
-    }
-  });
-
-  let minId = telecallers[0].id;
-  let minCount = Infinity;
-  counts.forEach((count, id) => {
-    if (count < minCount) { minCount = count; minId = id; }
-  });
-  return minId;
-}
-
 interface MarketingLeadFormProps {
   onSave: (lead: Lead) => void | Promise<void>;
   onCancel: () => void;
@@ -71,9 +48,11 @@ export function MarketingLeadForm({
   const campaigns = campaignsProp ?? store.getCampaigns();
   const users = usersProp ?? store.getUsers();
   const existingLeads = existingLeadsProp ?? store.getLeads();
+  const telecallers = users.filter((u) => u.role === "telecaller");
 
   const [form, setForm] = useState({
     name: "", phone: "", email: "", source: "", campaignId: "",
+    assignedTelecallerId: "",
     purposeOfInquiry: "", interestedCourse: "", city: "", notes: "",
     programChannel: "Individual Course Admission" as string,
     internshipCourse: "", internshipDuration: "", internshipLocation: "",
@@ -94,6 +73,7 @@ export function MarketingLeadForm({
     else if (!/^\d{10}$/.test(form.phone.trim())) e.phone = "Please enter a valid 10-digit phone number.";
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = "Please enter a valid email address.";
     if (!form.source) e.source = "Please select a lead source.";
+    if (!form.assignedTelecallerId) e.assignedTelecallerId = "Please assign a telecaller.";
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -105,7 +85,7 @@ export function MarketingLeadForm({
       throw new Error("duplicate");
     }
 
-    const assignedTelecallerId = getNextTelecaller(users, existingLeads);
+    const assignedTelecallerId = form.assignedTelecallerId;
     const assignedTelecallerName = users.find((u) => u.id === assignedTelecallerId)?.name || "";
     const now = new Date();
     const leadId = `l${Date.now()}`;
@@ -121,7 +101,7 @@ export function MarketingLeadForm({
     if (status !== "New") {
       activities.push({
         id: `act${Date.now() + 1}`, leadId, type: "Lead Assigned",
-        description: `Lead assigned to ${assignedTelecallerName} (round-robin)`,
+        description: `Lead assigned to ${assignedTelecallerName}`,
         timestamp: new Date(now.getTime() + 1000).toISOString(),
       });
     }
@@ -240,6 +220,14 @@ export function MarketingLeadForm({
               <SelectContent>{campaigns.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
             </Select>
           </div>
+        </div>
+        <div>
+          <Label>Assign Telecaller <span className="text-destructive">*</span></Label>
+          <Select value={form.assignedTelecallerId} onValueChange={(v) => set("assignedTelecallerId", v)}>
+            <SelectTrigger><SelectValue placeholder="Select telecaller" /></SelectTrigger>
+            <SelectContent>{telecallers.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
+          </Select>
+          <FieldError msg={errors.assignedTelecallerId} />
         </div>
 
         {/* Conditional: Individual Course Admission */}

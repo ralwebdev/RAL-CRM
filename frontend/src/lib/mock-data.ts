@@ -80,6 +80,25 @@ function getOrInit<T>(key: string, defaults: T[]): T[] {
 
 function save<T>(key: string, data: T[]) {
   db.createSync(key, data);
+  bumpStoreVersion();
+}
+
+type StoreListener = () => void;
+const storeListeners = new Set<StoreListener>();
+let storeVersion = 0;
+
+function bumpStoreVersion() {
+  storeVersion += 1;
+  storeListeners.forEach((l) => l());
+}
+
+export function subscribeStore(listener: StoreListener) {
+  storeListeners.add(listener);
+  return () => storeListeners.delete(listener);
+}
+
+export function getStoreVersion() {
+  return storeVersion;
 }
 
 export const store = {
@@ -128,5 +147,6 @@ export const store = {
 
   resetAll: () => {
     Object.values(STORAGE_KEYS).forEach((k) => db.deleteSync(k));
+    bumpStoreVersion();
   },
 };

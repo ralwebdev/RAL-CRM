@@ -24,7 +24,15 @@ import NotFound from "@/pages/NotFound";
 const queryClient = new QueryClient();
 
 function AppRoutes() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isAuthLoading } = useAuth();
+
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen grid place-items-center text-sm text-muted-foreground">
+        Restoring session...
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return <LoginPage />;

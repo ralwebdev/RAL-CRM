@@ -423,6 +423,7 @@ function LeadCreateForm({
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = "Please enter a valid email address.";
     if (!form.source) e.source = "Please select a lead source.";
     if (!isMarketing && !form.interestedCourse) e.interestedCourse = "Please select a course of interest.";
+    if (!form.assignedTelecallerId) e.assignedTelecallerId = "Please assign a telecaller.";
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -437,20 +438,7 @@ function LeadCreateForm({
       throw new Error("duplicate");
     }
 
-      // Round-robin if no telecaller selected
-    let assignedTc = form.assignedTelecallerId;
-    if (!assignedTc && telecallers.length > 0) {
-      const counts = new Map<string, number>();
-      telecallers.forEach((tc) => counts.set(tc.id, 0));
-      existingLeads.forEach((l) => {
-        if (l.assignedTelecallerId && counts.has(l.assignedTelecallerId))
-          counts.set(l.assignedTelecallerId, (counts.get(l.assignedTelecallerId) || 0) + 1);
-      });
-      let minId = telecallers[0].id, minCount = Infinity;
-      counts.forEach((c, id) => { if (c < minCount) { minCount = c; minId = id; } });
-      assignedTc = minId;
-    }
-
+    const assignedTc = form.assignedTelecallerId;
     const assignedName = users.find((u) => u.id === assignedTc)?.name || "";
     const leadId = `l${Date.now()}`;
     const now = new Date();
@@ -475,7 +463,7 @@ function LeadCreateForm({
       priorityScore: 30, priorityCategory: "Low Priority",
       activities: [
         { id: `act${Date.now()}`, leadId, type: "Lead Created", description: `New lead: ${form.name}`, timestamp: now.toISOString() },
-        ...(assignedTc ? [{ id: `act${Date.now() + 1}`, leadId, type: "Lead Assigned", description: `Assigned to ${assignedName} (auto)`, timestamp: new Date(now.getTime() + 1000).toISOString() }] : []),
+        ...(assignedTc ? [{ id: `act${Date.now() + 1}`, leadId, type: "Lead Assigned", description: `Assigned to ${assignedName}`, timestamp: new Date(now.getTime() + 1000).toISOString() }] : []),
       ],
     };
   };
@@ -540,17 +528,14 @@ function LeadCreateForm({
           <FieldError msg={errors.interestedCourse} />
         </div>
 
-        {/* Telecaller assignment — not shown for marketing */}
-        {!isMarketing && (
-          <div>
-            <Label>Assign Telecaller</Label>
-            <Select value={form.assignedTelecallerId} onValueChange={(v) => set("assignedTelecallerId", v)}>
-              <SelectTrigger><SelectValue placeholder="Auto-assign (round-robin)" /></SelectTrigger>
-              <SelectContent>{telecallers.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
-            </Select>
-            <p className="text-[10px] text-muted-foreground mt-1">Leave empty for automatic round-robin assignment.</p>
-          </div>
-        )}
+        <div>
+          <Label>Assign Telecaller <span className="text-destructive">*</span></Label>
+          <Select value={form.assignedTelecallerId} onValueChange={(v) => set("assignedTelecallerId", v)}>
+            <SelectTrigger><SelectValue placeholder="Select telecaller" /></SelectTrigger>
+            <SelectContent>{telecallers.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
+          </Select>
+          <FieldError msg={errors.assignedTelecallerId} />
+        </div>
 
         {/* Progressive disclosure — student profile (not for marketing quick form) */}
         {!isMarketing && form.interestedCourse && (

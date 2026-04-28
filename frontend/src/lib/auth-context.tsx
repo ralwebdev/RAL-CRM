@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useState, useCallback, useEffect, type ReactNode } from "react";
 import { AuthLoginResponse, User } from "./types";
 import { api } from "./api";
 import { session } from "./session";
@@ -26,6 +26,7 @@ interface AuthContextValue {
   loginByCredentials: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   isAuthenticated: boolean;
+  isAuthLoading: boolean;
   token: string | null;
   allUsers: User[];
 }
@@ -42,6 +43,7 @@ const normalizeUser = (payload: AuthLoginResponse): User => ({
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(() => session.getUser());
   const [token, setToken] = useState<string | null>(() => session.getToken());
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(() => !!session.getToken() && !session.getUser());
 
   const completeLogin = useCallback((response: AuthLoginResponse) => {
     const normalized = normalizeUser(response);
@@ -49,6 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(response.token);
     session.setUser(normalized);
     session.setToken(response.token);
+    setIsAuthLoading(false);
   }, []);
 
   const loginByCredentials = useCallback(async (email: string, password: string) => {
@@ -68,7 +71,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCurrentUser(null);
     setToken(null);
     session.clearSession();
+    setIsAuthLoading(false);
   }, []);
+
+  useEffect(() => {
+    if (!token || currentUser) {
+      setIsAuthLoading(false);
+      return;
+    }
+
+    let active = true;
+    setIsAuthLoading(true);
+
+    void api.get("/api/auth/profile")
+      .then((res) => {
+        if (!active) return;
+        const u = res.data;
+        const normalized: User = {
+          id: String(u?._id || u?.id || ""),
+          name: String(u?.name || ""),
+          email: String(u?.email || ""),
+          role: u?.role,
+        };
+        setCurrentUser(normalized);
+        session.setUser(normalized);
+      })
+      .catch(() => {
+        if (!active) return;
+        setCurrentUser(null);
+        setToken(null);
+        session.clearSession();
+      })
+      .finally(() => {
+        if (!active) return;
+        setIsAuthLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [token, currentUser]);
 
   const allUsers = useMemo(() => {
     if (!currentUser) return initialUsers;
@@ -77,7 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [currentUser]);
 
   return (
-    <AuthContext.Provider value={{ currentUser, completeLogin, loginByCredentials, logout, isAuthenticated: !!currentUser && !!token, token, allUsers }}>
+    <AuthContext.Provider value={{ currentUser, completeLogin, loginByCredentials, logout, isAuthenticated: !!currentUser && !!token, isAuthLoading, token, allUsers }}>
       {children}
     </AuthContext.Provider>
   );

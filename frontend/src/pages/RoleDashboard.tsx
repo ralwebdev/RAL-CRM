@@ -1,5 +1,5 @@
 import { useAuth, roleLabels } from "@/lib/auth-context";
-import { store, BENCHMARKS } from "@/lib/mock-data";
+import { store, BENCHMARKS, subscribeStore, getStoreVersion } from "@/lib/mock-data";
 import { StatCard } from "@/components/StatCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +18,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, AreaChart, Area
 } from "recharts";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { syncDashboardDataByRole } from "@/lib/owner-backend-sync";
 import {
   createTelecallingUser,
@@ -1573,6 +1573,7 @@ function AdminDashboard() {
    ═══════════════════════════════════════════════════════════════ */
 export default function RoleDashboard() {
   const { currentUser } = useAuth();
+  useSyncExternalStore(subscribeStore, getStoreVersion, getStoreVersion);
 
   useEffect(() => {
     void syncDashboardDataByRole(currentUser?.role).catch(() => { /* keep existing local data if sync fails */ });

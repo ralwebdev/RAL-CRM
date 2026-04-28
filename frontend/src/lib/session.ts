@@ -3,6 +3,7 @@ import type { User } from "./types";
 export const USER_SESSION_KEY = "crm_current_user";
 export const TOKEN_STORAGE_KEY = "crm_auth_token";
 export const SESSION_STORAGE_KEYS = [USER_SESSION_KEY, TOKEN_STORAGE_KEY] as const;
+let inMemoryUser: User | null = null;
 
 const getStorage = (): Storage | null => {
   if (typeof window === "undefined") return null;
@@ -35,21 +36,15 @@ const removeRaw = (key: string) => {
 
 export const session = {
   getUser(): User | null {
-    const raw = readRaw(USER_SESSION_KEY);
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw) as User;
-    } catch {
-      return null;
-    }
+    return inMemoryUser;
   },
 
   setUser(user: User) {
-    writeRaw(USER_SESSION_KEY, JSON.stringify(user));
+    inMemoryUser = user;
   },
 
   clearUser() {
-    removeRaw(USER_SESSION_KEY);
+    inMemoryUser = null;
   },
 
   getToken(): string | null {
@@ -65,7 +60,7 @@ export const session = {
   },
 
   clearSession() {
-    removeRaw(USER_SESSION_KEY);
+    inMemoryUser = null;
     removeRaw(TOKEN_STORAGE_KEY);
   },
 };
