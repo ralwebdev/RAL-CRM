@@ -44,6 +44,7 @@ import {
   type Collection,
 } from "@/lib/collection-store";
 import { LogCollectionDialog } from "@/components/counseling/LogCollectionDialog";
+import { fetchMarketingAdmissions } from "@/lib/marketing-api";
 
 const fmt = (n: number) => "₹" + n.toLocaleString("en-IN");
 const fmtDateTime = (iso?: string) =>
@@ -96,9 +97,21 @@ export function AdminBillingTab() {
   const { currentUser } = useAuth();
   const [tab, setTab] = useState("pending");
   const [logOpen, setLogOpen] = useState(false);
+  const [admissionStudents, setAdmissionStudents] = useState<Array<{ id: string; name: string; course: string; mobile?: string }>>([]);
 
   useEffect(() => {
     void hydrateCollectionsFromBackend().catch(() => { /* keep local workflow if backend sync fails */ });
+    void fetchMarketingAdmissions()
+      .then((rows) => {
+        const mapped = rows.map((a) => ({
+          id: a.id,
+          name: a.studentName,
+          course: a.courseSelected,
+          mobile: a.phone,
+        }));
+        setAdmissionStudents(mapped);
+      })
+      .catch(() => { /* optional source, ignore */ });
   }, []);
 
   const actor = {
@@ -139,12 +152,18 @@ export function AdminBillingTab() {
     new Date(c.invoiceRequest.adminReviewedAt).toDateString() === todayKey,
   ).length;
 
-  const studentsForLog = useMemo(
-    () => items.map(c => ({
+  const studentsForLog = useMemo(() => {
+    const fromCollections = items.map(c => ({
       id: c.studentId, name: c.studentName, course: c.courseName, mobile: c.studentMobile,
-    })),
-    [items],
-  );
+    }));
+    const merged = [...admissionStudents, ...fromCollections];
+    const unique = new Map<string, { id: string; name: string; course: string; mobile?: string }>();
+    merged.forEach((s) => {
+      if (!s?.id || !s?.name) return;
+      if (!unique.has(s.id)) unique.set(s.id, s);
+    });
+    return Array.from(unique.values());
+  }, [items, admissionStudents]);
 
   return (
     <div className="space-y-5">

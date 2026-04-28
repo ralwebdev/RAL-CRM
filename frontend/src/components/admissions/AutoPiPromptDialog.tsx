@@ -46,6 +46,10 @@ export function AutoPiPromptDialog({ admission, open, onClose }: Props) {
   if (!admission) return null;
 
   const submit = async () => {
+    if (currentUser?.role === "admin") {
+      toast.error("Admin scope is verification only. Invoice creation is handled by Accounts.");
+      return;
+    }
     if (fee <= 0) { toast.error("Enter a valid fee amount."); return; }
     if (!breakup) return;
     const inv = await createInvoiceAsync({
@@ -90,6 +94,12 @@ export function AutoPiPromptDialog({ admission, open, onClose }: Props) {
           </DialogDescription>
         </DialogHeader>
 
+        {currentUser?.role === "admin" && (
+          <div className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+            Admin scope is verification only. Invoice creation, editing, PI→TI conversion, receipt generation and sending are handled by Accounts after bank reconciliation.
+          </div>
+        )}
+
         {duplicate && (
           <div className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning flex items-start gap-2">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
@@ -126,7 +136,9 @@ export function AutoPiPromptDialog({ admission, open, onClose }: Props) {
 
           <div className="flex gap-2 pt-1">
             <Button variant="outline" className="flex-1" onClick={onClose}>Skip for now</Button>
-            <Button className="flex-1" onClick={submit} disabled={fee <= 0}>Generate PI</Button>
+            <Button className="flex-1" onClick={() => void submit()} disabled={fee <= 0 || currentUser?.role === "admin"}>
+              Generate PI
+            </Button>
           </div>
         </div>
       </DialogContent>
