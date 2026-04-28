@@ -19,7 +19,7 @@ import {
   PieChart, Pie, Cell, LineChart, Line, AreaChart, Area
 } from "recharts";
 import { useEffect, useMemo, useState } from "react";
-import { syncOwnerDashboardFromBackend } from "@/lib/owner-backend-sync";
+import { syncOwnerDashboardFromBackend, syncMarketingDashboardFromBackend } from "@/lib/owner-backend-sync";
 import {
   createTelecallingUser,
   deleteTelecallingUser,
@@ -1577,6 +1577,8 @@ export default function RoleDashboard() {
   useEffect(() => {
     if (currentUser?.role === "owner") {
       void syncOwnerDashboardFromBackend().catch(() => { /* keep existing local data if sync fails */ });
+    } else if (currentUser?.role === "marketing_manager") {
+      void syncMarketingDashboardFromBackend().catch(() => { /* keep existing local data if sync fails */ });
     }
   }, [currentUser?.role]);
 

@@ -39,3 +39,25 @@ export async function syncOwnerDashboardFromBackend(): Promise<void> {
     inFlight = null;
   }
 }
+
+export async function syncMarketingDashboardFromBackend(): Promise<void> {
+  if (inFlight) return inFlight;
+
+  inFlight = (async () => {
+    const [campaigns, leads, admissions] = await Promise.all([
+      fetchMarketingCampaigns(),
+      fetchMarketingLeads(),
+      fetchMarketingAdmissions(),
+    ]);
+
+    store.saveCampaigns(campaigns);
+    store.saveLeads(leads);
+    store.saveAdmissions(admissions);
+  })();
+
+  try {
+    await inFlight;
+  } finally {
+    inFlight = null;
+  }
+}

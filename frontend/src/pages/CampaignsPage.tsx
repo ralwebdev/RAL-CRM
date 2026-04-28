@@ -5,6 +5,7 @@ import {
 } from "@/lib/types";
 import { MASTER_LOCATIONS, MASTER_COURSE_NAMES } from "@/lib/master-schema";
 import { useAuth } from "@/lib/auth-context";
+import { store } from "@/lib/mock-data";
 import {
   createMarketingCampaign,
   createMarketingLead,
@@ -312,6 +313,9 @@ export default function CampaignsPage() {
         setCampaigns(campaignRows);
         setLeads(leadRows);
         setAdmissions(admissionRows);
+        store.saveCampaigns(campaignRows);
+        store.saveLeads(leadRows);
+        store.saveAdmissions(admissionRows);
       } catch (err: any) {
         if (!active) return;
         toast.error(err?.response?.data?.message || "Could not load marketing data from backend.");
@@ -362,7 +366,11 @@ export default function CampaignsPage() {
   const handleCreateCampaign = async (c: Campaign) => {
     try {
       const created = await createMarketingCampaign(c);
-      setCampaigns((prev) => [...prev, created]);
+      setCampaigns((prev) => {
+        const next = [...prev, created];
+        store.saveCampaigns(next);
+        return next;
+      });
       setCreateOpen(false);
       toast.success("Campaign created successfully.");
     } catch (err: any) {
@@ -377,7 +385,11 @@ export default function CampaignsPage() {
       const updatedCampaign = await updateMarketingCampaign(adSet.campaignId, {
         adSets: [...(existing.adSets || []), adSet],
       });
-      setCampaigns((prev) => prev.map((c) => c.id === updatedCampaign.id ? updatedCampaign : c));
+      setCampaigns((prev) => {
+        const next = prev.map((c) => c.id === updatedCampaign.id ? updatedCampaign : c);
+        store.saveCampaigns(next);
+        return next;
+      });
       setAdSetDialog(null);
       toast.success("Ad Set added successfully.");
     } catch (err: any) {
@@ -388,7 +400,11 @@ export default function CampaignsPage() {
   const handleCreateLead = async (lead: Lead) => {
     try {
       const created = await createMarketingLead(lead);
-      setLeads((prev) => [...prev, created]);
+      setLeads((prev) => {
+        const next = [...prev, created];
+        store.saveLeads(next);
+        return next;
+      });
       setLeadFormOpen(false);
     } catch (err: any) {
       toast.error(err?.response?.data?.message || "Failed to create lead.");
