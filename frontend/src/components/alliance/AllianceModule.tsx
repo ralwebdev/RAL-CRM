@@ -1,5 +1,5 @@
-/**
- * Industry Alliances Module — main UI.
+﻿/**
+ * Industry Alliances Module â€” main UI.
  * Mounted inside InstitutionalSalesPage as additional tabs and used by
  * dedicated alliance manager + executive dashboards.
  *
@@ -8,6 +8,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { allianceStore, downloadCSV } from "@/lib/alliance-data";
+import { api } from "@/lib/api";
+import { syncAllianceStoreFromBackend, type AllianceDirectoryUser } from "@/lib/alliance-api";
 import {
   PIPELINE_STAGES, INSTITUTION_TYPES, BOARD_UNIVERSITIES, VISIT_INTEREST_LEVELS,
   VISIT_STATUSES, TASK_STATUSES, TASK_PRIORITIES, PROPOSAL_TYPES, PROPOSAL_STATUSES,
@@ -26,7 +28,6 @@ import { StatCard } from "@/components/StatCard";
 import { DataTable, FormEngine, StatusPill, ActivityTimeline } from "@/components/alliance/AllianceUI";
 import type { ColumnDef, FieldConfig, ActivityItem } from "@/components/alliance/AllianceUI";
 import { ApprovalCenter } from "@/components/alliance/ApprovalCenter";
-import { approvalStore } from "@/lib/approvals";
 import {
   Building2, Users, Calendar, ListChecks, FileText, PartyPopper, Receipt,
   BarChart3, Plus, AlertTriangle, Download, TrendingUp, MapPin, ShieldCheck,
@@ -39,38 +40,13 @@ import { toast } from "sonner";
 
 const CHART_COLORS = ["hsl(var(--primary))", "hsl(var(--warning))", "hsl(var(--success))", "hsl(var(--info))", "hsl(280, 60%, 55%)", "hsl(180, 60%, 45%)"];
 
-// ── Helpers ──
+// â”€â”€ Helpers â”€â”€
 function daysBetween(a: string, b: string) {
   return Math.floor((new Date(a).getTime() - new Date(b).getTime()) / 86400000);
 }
 function todayIso() { return new Date().toISOString().split("T")[0]; }
 
-// ── Field configs (closed-ended) ──
-const allianceUsers = [
-  { id: "ae1", label: "Sneha Roy" },
-  { id: "ae2", label: "Karan Mehta" },
-  { id: "ae3", label: "Pooja Nair" },
-];
-const executiveOptions = allianceUsers.map((u) => u.label);
-const userIdByLabel = (label: string) => allianceUsers.find((u) => u.label === label)?.id ?? "";
-const userLabelById = (id: string) => allianceUsers.find((u) => u.id === id)?.label ?? id;
-
-const institutionFields: FieldConfig[] = [
-  { key: "name", label: "Institution Name", type: "text", required: true, placeholder: "e.g. Delhi Public School" },
-  { key: "type", label: "Type", type: "select", options: INSTITUTION_TYPES, required: true },
-  { key: "boardUniversity", label: "Board / University", type: "select", options: BOARD_UNIVERSITIES, required: true },
-  { key: "city", label: "City", type: "text", required: true },
-  { key: "district", label: "District", type: "text" },
-  { key: "address", label: "Address", type: "text", colSpan: 2 },
-  { key: "studentStrength", label: "Student Strength", type: "number", required: true },
-  { key: "decisionMaker", label: "Decision Maker", type: "text" },
-  { key: "phone", label: "Phone", type: "phone", required: true },
-  { key: "email", label: "Email", type: "email" },
-  { key: "assignedTo", label: "Assign Executive", type: "select", options: executiveOptions, required: true },
-  { key: "pipelineStage", label: "Pipeline Stage", type: "select", options: PIPELINE_STAGES, required: true },
-  { key: "notes", label: "Notes", type: "textarea", colSpan: 2 },
-];
-
+// â”€â”€ Field configs (closed-ended) â”€â”€
 interface AllianceModuleProps {
   scope: "manager" | "executive";
   executiveId?: string;
@@ -96,6 +72,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
   const [showEventForm, setShowEventForm] = useState(false);
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [drillInstitution, setDrillInstitution] = useState<Institution | null>(null);
+  const [directoryUsers, setDirectoryUsers] = useState<AllianceDirectoryUser[]>([]);
 
   // Auto-open create form based on URL action param
   useEffect(() => {
@@ -111,6 +88,44 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
   // Force re-render after mutations
   const [version, setVersion] = useState(0);
   const bump = () => setVersion((v) => v + 1);
+
+  const executiveUsers = useMemo(
+    () => directoryUsers.filter((u) => u.role === "alliance_executive"),
+    [directoryUsers],
+  );
+  const executiveOptions = executiveUsers.map((u) => u.name);
+  const userIdByLabel = (label: string) => executiveUsers.find((u) => u.name === label)?.id ?? "";
+  const userLabelById = (id: string) => directoryUsers.find((u) => u.id === id)?.name ?? id;
+  const defaultExecutiveId = executiveUsers[0]?.id || currentUser?.id || "";
+
+  const institutionFields: FieldConfig[] = [
+    { key: "name", label: "Institution Name", type: "text", required: true, placeholder: "e.g. Delhi Public School" },
+    { key: "type", label: "Type", type: "select", options: INSTITUTION_TYPES, required: true },
+    { key: "boardUniversity", label: "Board / University", type: "select", options: BOARD_UNIVERSITIES, required: true },
+    { key: "city", label: "City", type: "text", required: true },
+    { key: "district", label: "District", type: "text" },
+    { key: "address", label: "Address", type: "text", colSpan: 2 },
+    { key: "studentStrength", label: "Student Strength", type: "number", required: true },
+    { key: "decisionMaker", label: "Decision Maker", type: "text" },
+    { key: "phone", label: "Phone", type: "phone", required: true },
+    { key: "email", label: "Email", type: "email" },
+    { key: "assignedTo", label: "Assign Executive", type: "select", options: executiveOptions, required: true },
+    { key: "pipelineStage", label: "Pipeline Stage", type: "select", options: PIPELINE_STAGES, required: true },
+    { key: "notes", label: "Notes", type: "textarea", colSpan: 2 },
+  ];
+
+  const refreshFromBackend = async (force = false) => {
+    const { users } = await syncAllianceStoreFromBackend({ force });
+    setDirectoryUsers(users);
+    bump();
+  };
+
+  useEffect(() => {
+    refreshFromBackend(true).catch(() => {
+      toast.error("Unable to load alliance backend data.");
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Data load (memoised by version)
   const data = useMemo(() => {
@@ -145,7 +160,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
     };
   }, [version, scope, executiveId, stageFilter, districtFilter]);
 
-  // ── KPIs ──
+  // â”€â”€ KPIs â”€â”€
   const totalInstitutions = data.institutions.length;
   const meetingsThisMonth = data.visits.filter((v) => new Date(v.visitDate).getMonth() === new Date().getMonth() && v.status === "Completed").length;
   const proposalsSent = data.proposals.filter((p) => p.status !== "Draft").length;
@@ -153,7 +168,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
   const overdueTasks = data.tasks.filter((t) => t.status === "Overdue").length;
   const pendingFollowups = data.visits.filter((v) => v.nextFollowup && v.nextFollowup >= todayIso() && v.status === "Completed").length;
 
-  // ── Automations / Alerts ──
+  // â”€â”€ Automations / Alerts â”€â”€
   const alerts = useMemo(() => {
     const list: { id: string; severity: "warning" | "danger"; message: string }[] = [];
     // Overdue followups (>7 days since visit, no proposal sent)
@@ -166,7 +181,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
         }
       }
     });
-    // ≥3 meetings, no proposal
+    // â‰¥3 meetings, no proposal
     data.institutions.forEach((inst) => {
       const meetingCount = data.visits.filter((v) => v.institutionId === inst.id && v.status === "Completed").length;
       const hasProposal = data.proposals.some((p) => p.institutionId === inst.id && p.status !== "Draft");
@@ -179,7 +194,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
     return list;
   }, [data, overdueTasks]);
 
-  // ── Pipeline funnel data ──
+  // â”€â”€ Pipeline funnel data â”€â”€
   const pipelineData = useMemo(() => PIPELINE_STAGES.map((s) => ({
     stage: s,
     count: data.institutions.filter((i) => i.pipelineStage === s).length,
@@ -198,202 +213,253 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
   // Top executives
   const execLeaderboard = useMemo(() => {
     const m: Record<string, { meetings: number; mous: number; revenue: number }> = {};
-    allianceUsers.forEach((u) => { m[u.id] = { meetings: 0, mous: 0, revenue: 0 }; });
+    executiveUsers.forEach((u) => { m[u.id] = { meetings: 0, mous: 0, revenue: 0 }; });
     data.visits.forEach((v) => { if (v.status === "Completed" && m[v.executiveId]) m[v.executiveId].meetings += 1; });
     data.institutions.forEach((i) => {
       if ((i.pipelineStage === "MoU Signed" || i.pipelineStage === "Program Launched") && m[i.assignedTo]) m[i.assignedTo].mous += 1;
       const approved = data.proposals.filter((p) => p.institutionId === i.id && p.status === "Approved");
       if (m[i.assignedTo]) m[i.assignedTo].revenue += approved.reduce((s, p) => s + p.amount, 0);
     });
-    return allianceUsers.map((u) => ({ name: u.label, ...m[u.id] }));
-  }, [data]);
+    return executiveUsers.map((u) => ({ name: u.name, ...m[u.id] }));
+  }, [data, executiveUsers]);
 
-  // ── Mutations ──
-  const saveInstitution = (vals: Record<string, unknown>) => {
-    const all = allianceStore.getInstitutions();
-    const studentStrength = Number(vals.studentStrength) || 0;
-    const { score, bucket } = computePriority(studentStrength);
-    const assignedToId = userIdByLabel(String(vals.assignedTo));
-    if (editInstitution) {
-      const updated = all.map((i) => i.id === editInstitution.id ? { ...i, ...vals, studentStrength, priorityScore: score, priority: bucket, assignedTo: assignedToId } as Institution : i);
-      allianceStore.saveInstitutions(updated);
-      toast.success("Institution updated.");
-    } else {
-      const id = `inst${Date.now()}`;
-      const seq = (all.length + 1).toString().padStart(4, "0");
-      const newInst: Institution = {
-        id,
-        institutionId: `INS-${seq}`,
-        name: String(vals.name),
-        type: vals.type as Institution["type"],
-        boardUniversity: vals.boardUniversity as Institution["boardUniversity"],
+  // Mutations
+  const saveInstitution = async (vals: Record<string, unknown>) => {
+    try {
+      const studentStrength = Number(vals.studentStrength) || 0;
+      const { score, bucket } = computePriority(studentStrength);
+      const assignedToId = userIdByLabel(String(vals.assignedTo)) || defaultExecutiveId;
+      if (!assignedToId) {
+        toast.error("No alliance executive available for assignment.");
+        return;
+      }
+
+      const payload = {
+        name: String(vals.name || ""),
+        type: vals.type,
+        boardUniversity: vals.boardUniversity,
         district: String(vals.district || ""),
-        city: String(vals.city),
+        city: String(vals.city || ""),
         address: String(vals.address || ""),
         studentStrength,
         decisionMaker: String(vals.decisionMaker || ""),
-        phone: String(vals.phone),
+        phone: String(vals.phone || ""),
         email: String(vals.email || ""),
         priorityScore: score,
         priority: bucket,
-        assignedTo: assignedToId,
-        pipelineStage: vals.pipelineStage as Institution["pipelineStage"],
+        assignedExecutiveId: assignedToId,
+        pipelineStage: vals.pipelineStage,
         notes: String(vals.notes || ""),
-        createdAt: todayIso(),
       };
-      allianceStore.saveInstitutions([newInst, ...all]);
-      toast.success("Institution added.");
+
+      if (editInstitution) {
+        await api.put(`/api/alliances/institutions/${editInstitution.id}`, payload);
+        toast.success("Institution updated.");
+      } else {
+        await api.post("/api/alliances/institutions", payload);
+        toast.success("Institution added.");
+      }
+      setShowInstForm(false);
+      setEditInstitution(null);
+      await refreshFromBackend(true);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to save institution.");
     }
-    setShowInstForm(false);
-    setEditInstitution(null);
-    bump();
   };
 
-  const updatePipelineStage = (instId: string, newStage: AlliancePipelineStage) => {
-    const all = allianceStore.getInstitutions();
-    allianceStore.saveInstitutions(all.map((i) => i.id === instId ? { ...i, pipelineStage: newStage } : i));
-    toast.success("Pipeline stage updated.");
-    bump();
+  const updatePipelineStage = async (instId: string, newStage: AlliancePipelineStage) => {
+    try {
+      await api.put(`/api/alliances/institutions/${instId}`, { pipelineStage: newStage });
+      toast.success("Pipeline stage updated.");
+      await refreshFromBackend(true);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to update pipeline stage.");
+    }
   };
 
-  const saveVisit = (vals: Record<string, unknown>) => {
-    const all = allianceStore.getVisits();
+  const saveVisit = async (vals: Record<string, unknown>) => {
     const inst = data.institutions.find((i) => i.name === vals.institution);
-    if (!inst) { toast.error("Select a valid institution."); return; }
-    const newVisit: AllianceVisit = {
-      id: `v${Date.now()}`,
-      institutionId: inst.id,
-      executiveId: scope === "executive" && executiveId ? executiveId : userIdByLabel(String(vals.executive)) || "ae1",
-      visitDate: String(vals.visitDate),
-      meetingPerson: String(vals.meetingPerson),
-      summary: String(vals.summary),
-      interestLevel: vals.interestLevel as AllianceVisit["interestLevel"],
-      nextFollowup: String(vals.nextFollowup || ""),
-      status: vals.status as AllianceVisit["status"],
-      photoUrl: "",
-      createdAt: todayIso(),
-    };
-    allianceStore.saveVisits([newVisit, ...all]);
-    toast.success("Visit logged.");
-    setShowVisitForm(false);
-    bump();
+    if (!inst) {
+      toast.error("Select a valid institution.");
+      return;
+    }
+
+    const selectedExecId =
+      scope === "executive" && executiveId
+        ? executiveId
+        : userIdByLabel(String(vals.executive)) || defaultExecutiveId;
+
+    try {
+      await api.post("/api/alliances/visits", {
+        institutionId: inst.id,
+        executiveId: selectedExecId,
+        visitDate: String(vals.visitDate || todayIso()),
+        meetingPerson: String(vals.meetingPerson || ""),
+        summary: String(vals.summary || ""),
+        interestLevel: vals.interestLevel,
+        nextFollowup: vals.nextFollowup ? String(vals.nextFollowup) : undefined,
+        status: vals.status,
+        photoUrl: "",
+      });
+      toast.success("Visit logged.");
+      setShowVisitForm(false);
+      await refreshFromBackend(true);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to log visit.");
+    }
   };
 
-  const saveTask = (vals: Record<string, unknown>) => {
-    const all = allianceStore.getTasks();
+  const saveTask = async (vals: Record<string, unknown>) => {
     const inst = data.institutions.find((i) => i.name === vals.institution);
-    const newTask: AllianceTask = {
-      id: `tk${Date.now()}`,
-      title: String(vals.title),
-      institutionId: inst?.id ?? "",
-      assignedTo: scope === "executive" && executiveId ? executiveId : userIdByLabel(String(vals.assignee)) || "ae1",
-      dueDate: String(vals.dueDate),
-      status: "Pending",
-      priority: vals.priority as AllianceTask["priority"],
-      createdAt: todayIso(),
-    };
-    allianceStore.saveTasks([newTask, ...all]);
-    toast.success("Task created.");
-    setShowTaskForm(false);
-    bump();
+    if (!inst) {
+      toast.error("Select a valid institution.");
+      return;
+    }
+
+    const assigneeId =
+      scope === "executive" && executiveId
+        ? executiveId
+        : userIdByLabel(String(vals.assignee)) || defaultExecutiveId;
+
+    try {
+      await api.post("/api/alliances/tasks", {
+        title: String(vals.title || ""),
+        institutionId: inst.id,
+        assignedTo: assigneeId,
+        dueDate: String(vals.dueDate || todayIso()),
+        status: "Pending",
+        priority: vals.priority,
+      });
+      toast.success("Task created.");
+      setShowTaskForm(false);
+      await refreshFromBackend(true);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to create task.");
+    }
   };
 
-  const toggleTaskStatus = (task: AllianceTask) => {
-    const all = allianceStore.getTasks();
+  const toggleTaskStatus = async (task: AllianceTask) => {
     const next = task.status === "Done" ? "Pending" : "Done";
-    allianceStore.saveTasks(all.map((t) => t.id === task.id ? { ...t, status: next } : t));
-    bump();
+    try {
+      await api.put(`/api/alliances/tasks/${task.id}`, { status: next });
+      await refreshFromBackend(true);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to update task status.");
+    }
   };
 
-  const saveProposal = (vals: Record<string, unknown>) => {
-    const all = allianceStore.getProposals();
+  const saveProposal = async (vals: Record<string, unknown>) => {
     const inst = data.institutions.find((i) => i.name === vals.institution);
-    if (!inst) { toast.error("Select an institution."); return; }
-    const newP: AllianceProposal = {
-      id: `pr${Date.now()}`,
-      institutionId: inst.id,
-      proposalType: vals.proposalType as AllianceProposal["proposalType"],
-      amount: Number(vals.amount) || 0,
-      status: vals.status as AllianceProposal["status"],
-      sentDate: String(vals.sentDate),
-      notes: String(vals.notes || ""),
-    };
-    allianceStore.saveProposals([newP, ...all]);
-    toast.success("Proposal added.");
-    setShowProposalForm(false);
-    bump();
+    if (!inst) {
+      toast.error("Select an institution.");
+      return;
+    }
+
+    try {
+      await api.post("/api/alliances/proposals", {
+        institutionId: inst.id,
+        proposalType: vals.proposalType,
+        amount: Number(vals.amount) || 0,
+        status: vals.status,
+        sentDate: String(vals.sentDate || todayIso()),
+        notes: String(vals.notes || ""),
+      });
+      toast.success("Proposal added.");
+      setShowProposalForm(false);
+      await refreshFromBackend(true);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to save proposal.");
+    }
   };
 
-  const approveProposal = (id: string) => {
-    const all = allianceStore.getProposals();
-    allianceStore.saveProposals(all.map((p) => p.id === id ? { ...p, status: "Approved", approvedBy: currentUser?.id } : p));
-    toast.success("Proposal approved.");
-    bump();
+  const approveProposal = async (id: string) => {
+    try {
+      await api.put(`/api/alliances/proposals/${id}`, { status: "Approved", approvedBy: currentUser?.id });
+      toast.success("Proposal approved.");
+      await refreshFromBackend(true);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to approve proposal.");
+    }
   };
 
-  const saveEvent = (vals: Record<string, unknown>) => {
-    const all = allianceStore.getEvents();
+  const saveEvent = async (vals: Record<string, unknown>) => {
     const inst = data.institutions.find((i) => i.name === vals.institution);
-    const newE: AllianceEvent = {
-      id: `ev${Date.now()}`,
-      institutionId: inst?.id ?? "",
-      eventName: String(vals.eventName),
-      eventType: vals.eventType as AllianceEvent["eventType"],
-      eventDate: String(vals.eventDate),
-      attendees: Number(vals.attendees) || 0,
-      leadsGenerated: Number(vals.leadsGenerated) || 0,
-      notes: String(vals.notes || ""),
-    };
-    allianceStore.saveEvents([newE, ...all]);
-    toast.success("Event captured.");
-    setShowEventForm(false);
-    bump();
+    if (!inst) {
+      toast.error("Select a valid institution.");
+      return;
+    }
+
+    try {
+      await api.post("/api/alliances/events", {
+        institutionId: inst.id,
+        eventName: String(vals.eventName || ""),
+        eventType: vals.eventType,
+        eventDate: String(vals.eventDate || todayIso()),
+        attendees: Number(vals.attendees) || 0,
+        leadsGenerated: Number(vals.leadsGenerated) || 0,
+        notes: String(vals.notes || ""),
+      });
+      toast.success("Event captured.");
+      setShowEventForm(false);
+      await refreshFromBackend(true);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to save event.");
+    }
   };
 
-  const saveExpense = (vals: Record<string, unknown>) => {
-    const all = allianceStore.getExpenses();
+  const saveExpense = async (vals: Record<string, unknown>) => {
     const inst = data.institutions.find((i) => i.name === vals.institution);
+    if (!inst) {
+      toast.error("Select a valid institution.");
+      return;
+    }
+
     const amount = Number(vals.amount) || 0;
     const expenseType = vals.expenseType as AllianceExpense["expenseType"];
-    const execId = scope === "executive" && executiveId ? executiveId : userIdByLabel(String(vals.executive)) || "ae1";
-    const newEx: AllianceExpense = {
-      id: `ex${Date.now()}`,
-      executiveId: execId,
-      institutionId: inst?.id ?? "",
-      expenseType,
-      amount,
-      billUrl: "",
-      expenseDate: String(vals.expenseDate),
-      status: "Submitted",
-      notes: String(vals.notes || ""),
-    };
-    allianceStore.saveExpenses([newEx, ...all]);
-    // Auto-create approval routed to manager
-    if (currentUser) {
-      const requestType = expenseType === "Travel" ? "Travel Reimbursement" : "Expense Bill";
-      approvalStore.submit({
-        requestId: newEx.id,
-        requestType,
-        title: `${expenseType} ₹${amount.toLocaleString()} — ${userLabelById(execId)}`,
-        submittedBy: currentUser.id,
-        submittedRole: currentUser.role,
+    const execId =
+      scope === "executive" && executiveId
+        ? executiveId
+        : userIdByLabel(String(vals.executive)) || defaultExecutiveId;
+
+    try {
+      const response = await api.post("/api/alliances/expenses", {
+        executiveId: execId,
+        institutionId: inst.id,
+        expenseType,
         amount,
-        priority: amount > 2000 ? "High" : "Medium",
-        notes: newEx.notes || `${expenseType} expense for ${inst?.name ?? "—"}`,
+        billUrl: "",
+        expenseDate: String(vals.expenseDate || todayIso()),
+        status: "Submitted",
+        notes: String(vals.notes || ""),
       });
+
+      if (currentUser) {
+        const requestType = expenseType === "Travel" ? "Travel Reimbursement" : "Expense Bill";
+        await api.post("/api/alliances/approvals", {
+          requestId: response?.data?.id || response?.data?._id || "",
+          requestType,
+          title: `${expenseType} INR ${amount.toLocaleString()} - ${userLabelById(execId)}`,
+          amount,
+          priority: amount > 2000 ? "High" : "Medium",
+          notes: String(vals.notes || `${expenseType} expense for ${inst.name}`),
+          meta: { module: "alliance", entity: "AllianceExpense" },
+        });
+      }
+
+      toast.success("Expense submitted for approval.");
+      setShowExpenseForm(false);
+      await refreshFromBackend(true);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to submit expense.");
     }
-    toast.success("Expense submitted for approval.");
-    setShowExpenseForm(false);
-    bump();
   };
 
-  // ── Column defs ──
   const institutionColumns: ColumnDef<Institution>[] = [
     { key: "id", header: "ID", render: (r) => <span className="font-mono text-[10px] text-muted-foreground">{r.institutionId}</span>, hideOnMobile: true },
     { key: "name", header: "Institution", render: (r) => (
       <div>
         <p className="font-medium">{r.name}</p>
-        <p className="text-[10px] text-muted-foreground">{r.type} · {r.city}</p>
+        <p className="text-[10px] text-muted-foreground">{r.type} Â· {r.city}</p>
       </div>
     ) },
     { key: "stage", header: "Stage", render: (r) => (
@@ -412,7 +478,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
 
   const taskColumns: ColumnDef<AllianceTask>[] = [
     { key: "title", header: "Task", render: (r) => <span className="font-medium">{r.title}</span> },
-    { key: "inst", header: "Institution", render: (r) => <span className="text-xs text-muted-foreground">{data.institutions.find((i) => i.id === r.institutionId)?.name ?? "—"}</span>, hideOnMobile: true },
+    { key: "inst", header: "Institution", render: (r) => <span className="text-xs text-muted-foreground">{data.institutions.find((i) => i.id === r.institutionId)?.name ?? "â€”"}</span>, hideOnMobile: true },
     { key: "due", header: "Due", render: (r) => <span className="text-xs whitespace-nowrap">{r.dueDate}</span> },
     { key: "priority", header: "Priority", render: (r) => <StatusPill value={r.priority} />, hideOnMobile: true },
     { key: "status", header: "Status", render: (r) => <StatusPill value={r.status} /> },
@@ -421,17 +487,17 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
 
   const visitColumns: ColumnDef<AllianceVisit>[] = [
     { key: "date", header: "Date", render: (r) => <span className="text-xs whitespace-nowrap">{r.visitDate}</span> },
-    { key: "inst", header: "Institution", render: (r) => <span className="font-medium text-xs">{data.institutions.find((i) => i.id === r.institutionId)?.name ?? "—"}</span> },
+    { key: "inst", header: "Institution", render: (r) => <span className="font-medium text-xs">{data.institutions.find((i) => i.id === r.institutionId)?.name ?? "â€”"}</span> },
     { key: "person", header: "Met With", render: (r) => <span className="text-xs">{r.meetingPerson}</span>, hideOnMobile: true },
     { key: "interest", header: "Interest", render: (r) => <StatusPill value={r.interestLevel} />, hideOnMobile: true },
     { key: "status", header: "Status", render: (r) => <StatusPill value={r.status} /> },
-    { key: "next", header: "Next Follow-up", render: (r) => <span className="text-xs text-muted-foreground">{r.nextFollowup || "—"}</span>, hideOnMobile: true },
+    { key: "next", header: "Next Follow-up", render: (r) => <span className="text-xs text-muted-foreground">{r.nextFollowup || "â€”"}</span>, hideOnMobile: true },
   ];
 
   const proposalColumns: ColumnDef<AllianceProposal>[] = [
-    { key: "inst", header: "Institution", render: (r) => <span className="font-medium text-xs">{data.institutions.find((i) => i.id === r.institutionId)?.name ?? "—"}</span> },
+    { key: "inst", header: "Institution", render: (r) => <span className="font-medium text-xs">{data.institutions.find((i) => i.id === r.institutionId)?.name ?? "â€”"}</span> },
     { key: "type", header: "Type", render: (r) => <Badge variant="outline" className="text-[9px]">{r.proposalType}</Badge>, hideOnMobile: true },
-    { key: "amount", header: "Amount", render: (r) => <span className="font-semibold text-success">₹{r.amount.toLocaleString()}</span> },
+    { key: "amount", header: "Amount", render: (r) => <span className="font-semibold text-success">â‚¹{r.amount.toLocaleString()}</span> },
     { key: "sent", header: "Sent", render: (r) => <span className="text-xs whitespace-nowrap">{r.sentDate}</span>, hideOnMobile: true },
     { key: "status", header: "Status", render: (r) => <StatusPill value={r.status} /> },
     { key: "act", header: "", render: (r) => scope === "manager" && (r.status === "Sent" || r.status === "Under Review") ? (
@@ -442,7 +508,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
   const eventColumns: ColumnDef<AllianceEvent>[] = [
     { key: "name", header: "Event", render: (r) => <span className="font-medium text-xs">{r.eventName}</span> },
     { key: "type", header: "Type", render: (r) => <Badge variant="outline" className="text-[9px]">{r.eventType}</Badge>, hideOnMobile: true },
-    { key: "inst", header: "Institution", render: (r) => <span className="text-xs text-muted-foreground">{data.institutions.find((i) => i.id === r.institutionId)?.name ?? "—"}</span>, hideOnMobile: true },
+    { key: "inst", header: "Institution", render: (r) => <span className="text-xs text-muted-foreground">{data.institutions.find((i) => i.id === r.institutionId)?.name ?? "â€”"}</span>, hideOnMobile: true },
     { key: "date", header: "Date", render: (r) => <span className="text-xs whitespace-nowrap">{r.eventDate}</span> },
     { key: "att", header: "Attendees", render: (r) => <span className="text-xs">{r.attendees}</span>, hideOnMobile: true },
     { key: "leads", header: "Leads", render: (r) => <span className="font-semibold text-primary">{r.leadsGenerated}</span> },
@@ -452,19 +518,19 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
     { key: "date", header: "Date", render: (r) => <span className="text-xs whitespace-nowrap">{r.expenseDate}</span> },
     { key: "type", header: "Type", render: (r) => <Badge variant="outline" className="text-[9px]">{r.expenseType}</Badge> },
     { key: "exec", header: "Executive", render: (r) => <span className="text-xs">{userLabelById(r.executiveId)}</span>, hideOnMobile: true },
-    { key: "amount", header: "Amount", render: (r) => <span className="font-semibold">₹{r.amount.toLocaleString()}</span> },
+    { key: "amount", header: "Amount", render: (r) => <span className="font-semibold">â‚¹{r.amount.toLocaleString()}</span> },
     { key: "status", header: "Status", render: (r) => <StatusPill value={r.status} /> },
   ];
 
   const contactColumns: ColumnDef<AllianceContact>[] = [
     { key: "name", header: "Name", render: (r) => <span className="font-medium text-xs">{r.name}</span> },
     { key: "designation", header: "Designation", render: (r) => <span className="text-xs">{r.designation}</span>, hideOnMobile: true },
-    { key: "inst", header: "Institution", render: (r) => <span className="text-xs text-muted-foreground">{data.institutions.find((i) => i.id === r.institutionId)?.name ?? "—"}</span> },
+    { key: "inst", header: "Institution", render: (r) => <span className="text-xs text-muted-foreground">{data.institutions.find((i) => i.id === r.institutionId)?.name ?? "â€”"}</span> },
     { key: "phone", header: "Phone", render: (r) => <span className="text-xs">{r.phone}</span> },
     { key: "email", header: "Email", render: (r) => <span className="text-xs text-muted-foreground">{r.email}</span>, hideOnMobile: true },
   ];
 
-  // ── Field configs for forms ──
+  // â”€â”€ Field configs for forms â”€â”€
   const visitFields: FieldConfig[] = [
     { key: "institution", label: "Institution", type: "select", options: data.institutions.map((i) => i.name), required: true },
     { key: "visitDate", label: "Visit Date", type: "date", required: true },
@@ -485,7 +551,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
   const proposalFields: FieldConfig[] = [
     { key: "institution", label: "Institution", type: "select", options: data.institutions.map((i) => i.name), required: true },
     { key: "proposalType", label: "Type", type: "select", options: PROPOSAL_TYPES, required: true },
-    { key: "amount", label: "Amount (₹)", type: "number", required: true },
+    { key: "amount", label: "Amount (â‚¹)", type: "number", required: true },
     { key: "status", label: "Status", type: "select", options: PROPOSAL_STATUSES, required: true },
     { key: "sentDate", label: "Sent Date", type: "date", required: true },
     { key: "notes", label: "Notes", type: "textarea", colSpan: 2 },
@@ -501,14 +567,14 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
   ];
   const expenseFields: FieldConfig[] = [
     { key: "expenseType", label: "Type", type: "select", options: EXPENSE_TYPES, required: true },
-    { key: "amount", label: "Amount (₹)", type: "number", required: true },
+    { key: "amount", label: "Amount (â‚¹)", type: "number", required: true },
     { key: "expenseDate", label: "Date", type: "date", required: true },
     { key: "institution", label: "Institution", type: "select", options: data.institutions.map((i) => i.name) },
     ...(scope === "manager" ? [{ key: "executive", label: "Executive", type: "select" as const, options: executiveOptions, required: true }] : []),
     { key: "notes", label: "Notes", type: "textarea", colSpan: 2 },
   ];
 
-  // ── Activity timeline (recent events, visits, proposals) ──
+  // â”€â”€ Activity timeline (recent events, visits, proposals) â”€â”€
   const recentActivity: ActivityItem[] = useMemo(() => {
     const items: ActivityItem[] = [];
     data.visits.forEach((v) => {
@@ -517,12 +583,12 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
     });
     data.proposals.forEach((p) => {
       const inst = data.institutions.find((i) => i.id === p.institutionId);
-      items.push({ id: `act-p-${p.id}`, title: `${p.proposalType}: ${inst?.name ?? ""}`, description: `₹${p.amount.toLocaleString()} · ${p.status}`, timestamp: p.sentDate, badge: p.status });
+      items.push({ id: `act-p-${p.id}`, title: `${p.proposalType}: ${inst?.name ?? ""}`, description: `â‚¹${p.amount.toLocaleString()} Â· ${p.status}`, timestamp: p.sentDate, badge: p.status });
     });
     return items.sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, 8);
   }, [data]);
 
-  // ── Reports / Exports ──
+  // â”€â”€ Reports / Exports â”€â”€
   const exportInstitutions = () => downloadCSV("alliance_institutions.csv", data.institutions.map((i) => ({
     InstitutionID: i.institutionId, Name: i.name, Type: i.type, Board: i.boardUniversity, City: i.city, District: i.district,
     StudentStrength: i.studentStrength, Stage: i.pipelineStage, Priority: i.priority, Executive: userLabelById(i.assignedTo),
@@ -546,7 +612,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      {/* ── KPI Snapshot ── */}
+      {/* â”€â”€ KPI Snapshot â”€â”€ */}
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
         <StatCard title="Institutions" value={totalInstitutions} icon={<Building2 className="h-5 w-5" />} />
         <StatCard title="Meetings (mth)" value={meetingsThisMonth} icon={<Calendar className="h-5 w-5" />} />
@@ -556,7 +622,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
         <StatCard title="Overdue" value={overdueTasks} icon={<AlertTriangle className="h-5 w-5" />} />
       </div>
 
-      {/* ── Alerts ── */}
+      {/* â”€â”€ Alerts â”€â”€ */}
       {alerts.length > 0 && (
         <div className="rounded-xl bg-card p-4 shadow-card border-l-4 border-warning">
           <div className="flex items-center gap-2 mb-2">
@@ -565,13 +631,13 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
           </div>
           <ul className="space-y-1.5">
             {alerts.slice(0, 5).map((a) => (
-              <li key={a.id} className={`text-xs ${a.severity === "danger" ? "text-destructive" : "text-warning"}`}>• {a.message}</li>
+              <li key={a.id} className={`text-xs ${a.severity === "danger" ? "text-destructive" : "text-warning"}`}>â€¢ {a.message}</li>
             ))}
           </ul>
         </div>
       )}
 
-      {/* ── Tabs ── */}
+      {/* â”€â”€ Tabs â”€â”€ */}
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="overflow-x-auto flex-nowrap w-full justify-start">
           <TabsTrigger value="institutions" className="text-[11px] sm:text-xs"><Building2 className="mr-1 h-3.5 w-3.5" />{scope === "executive" ? "My Institutions" : "Institutions"}</TabsTrigger>
@@ -585,7 +651,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
           <TabsTrigger value="reports" className="text-[11px] sm:text-xs"><BarChart3 className="mr-1 h-3.5 w-3.5" />Reports</TabsTrigger>
         </TabsList>
 
-        {/* ── Institutions ── */}
+        {/* â”€â”€ Institutions â”€â”€ */}
         <TabsContent value="institutions" className="space-y-4 mt-4">
           {/* Active filter banner */}
           {(stageFilter !== "all" || districtFilter !== "all") && (
@@ -599,7 +665,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
               <Button size="sm" variant="ghost" className="h-7 text-[11px]" onClick={() => { setStageFilter("all"); setDistrictFilter("all"); }}>Clear</Button>
             </div>
           )}
-          {/* Pipeline funnel — clickable bars filter institutions by stage */}
+          {/* Pipeline funnel â€” clickable bars filter institutions by stage */}
           <div className="rounded-xl bg-card p-4 sm:p-5 shadow-card">
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pipeline Funnel</h4>
@@ -626,83 +692,83 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
             columns={institutionColumns}
             searchable={(r) => `${r.name} ${r.city} ${r.type} ${r.boardUniversity}`}
             onRowClick={(r) => setDrillInstitution(r)}
-            searchPlaceholder="Search institutions, cities, boards…"
+            searchPlaceholder="Search institutions, cities, boardsâ€¦"
             emptyMessage={stageFilter !== "all" || districtFilter !== "all" ? "No institutions match the current filters." : "No institutions yet. Add your first high-potential account."}
             toolbar={scope === "manager" ? <Button size="sm" onClick={() => { setEditInstitution(null); setShowInstForm(true); }}><Plus className="mr-1 h-4 w-4" /> Add Institution</Button> : undefined}
           />
         </TabsContent>
 
-        {/* ── Contacts ── */}
+        {/* â”€â”€ Contacts â”€â”€ */}
         <TabsContent value="contacts" className="mt-4">
-          <DataTable data={data.contacts} columns={contactColumns} searchable={(r) => `${r.name} ${r.designation} ${r.email}`} searchPlaceholder="Search contacts…" />
+          <DataTable data={data.contacts} columns={contactColumns} searchable={(r) => `${r.name} ${r.designation} ${r.email}`} searchPlaceholder="Search contactsâ€¦" />
         </TabsContent>
 
-        {/* ── Visits ── */}
+        {/* â”€â”€ Visits â”€â”€ */}
         <TabsContent value="visits" className="mt-4">
           <DataTable
             data={data.visits}
             columns={visitColumns}
             searchable={(r) => `${r.meetingPerson} ${r.summary}`}
-            searchPlaceholder="Search visits…"
+            searchPlaceholder="Search visitsâ€¦"
             toolbar={<Button size="sm" onClick={() => setShowVisitForm(true)}><Plus className="mr-1 h-4 w-4" /> Log Visit</Button>}
           />
         </TabsContent>
 
-        {/* ── Tasks ── */}
+        {/* â”€â”€ Tasks â”€â”€ */}
         <TabsContent value="tasks" className="mt-4">
           <DataTable
             data={data.tasks}
             columns={taskColumns}
             searchable={(r) => r.title}
-            searchPlaceholder="Search tasks…"
+            searchPlaceholder="Search tasksâ€¦"
             toolbar={<Button size="sm" onClick={() => setShowTaskForm(true)}><Plus className="mr-1 h-4 w-4" /> Add Task</Button>}
           />
         </TabsContent>
 
-        {/* ── Proposals ── */}
+        {/* â”€â”€ Proposals â”€â”€ */}
         <TabsContent value="proposals" className="mt-4">
           <DataTable
             data={data.proposals}
             columns={proposalColumns}
             searchable={(r) => r.proposalType + " " + r.notes}
-            searchPlaceholder="Search proposals…"
+            searchPlaceholder="Search proposalsâ€¦"
             toolbar={<Button size="sm" onClick={() => setShowProposalForm(true)}><Plus className="mr-1 h-4 w-4" /> New Proposal</Button>}
           />
         </TabsContent>
 
-        {/* ── Events ── */}
+        {/* â”€â”€ Events â”€â”€ */}
         <TabsContent value="events" className="mt-4">
           <DataTable
             data={data.events}
             columns={eventColumns}
             searchable={(r) => `${r.eventName} ${r.eventType}`}
-            searchPlaceholder="Search events…"
+            searchPlaceholder="Search eventsâ€¦"
             toolbar={<Button size="sm" onClick={() => setShowEventForm(true)}><Plus className="mr-1 h-4 w-4" /> Capture Event</Button>}
           />
         </TabsContent>
 
-        {/* ── Expenses ── */}
+        {/* â”€â”€ Expenses â”€â”€ */}
         <TabsContent value="expenses" className="mt-4">
           <DataTable
             data={data.expenses}
             columns={expenseColumns}
             searchable={(r) => `${r.expenseType} ${r.notes}`}
-            searchPlaceholder="Search expenses…"
+            searchPlaceholder="Search expensesâ€¦"
             toolbar={<Button size="sm" onClick={() => setShowExpenseForm(true)}><Plus className="mr-1 h-4 w-4" /> Submit Expense</Button>}
           />
         </TabsContent>
 
-        {/* ── Approvals ── */}
+        {/* â”€â”€ Approvals â”€â”€ */}
         <TabsContent value="approvals" className="mt-4">
           <ApprovalCenter />
         </TabsContent>
 
-        {/* ── Reports / Insights ── */}
+        {/* â”€â”€ Reports / Insights â”€â”€ */}
         <TabsContent value="reports" className="space-y-4 mt-4">
           <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
             <StatCard title="Conversion Rate" value={`${conversionRate}%`} icon={<TrendingUp className="h-5 w-5" />} />
             <StatCard title="Proposal Success" value={`${proposalSuccessRate}%`} icon={<FileText className="h-5 w-5" />} />
-            <StatCard title="Revenue Forecast" value={`₹${(totalRevenueForecast / 1000).toFixed(0)}k`} icon={<BarChart3 className="h-5 w-5" />} />
+            <StatCard title="Revenue Forecast" value={`â‚¹${(totalRevenueForecast / 1000).toFixed(0)}k`} icon={<BarChart3 className="h-5 w-5" />} />
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
@@ -727,7 +793,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
                     <div className="flex gap-3 text-[10px]">
                       <span className="text-muted-foreground">Meetings: <span className="font-semibold text-card-foreground">{u.meetings}</span></span>
                       <span className="text-muted-foreground">MoUs: <span className="font-semibold text-success">{u.mous}</span></span>
-                      <span className="text-muted-foreground">Revenue: <span className="font-semibold text-primary">₹{(u.revenue / 1000).toFixed(0)}k</span></span>
+                      <span className="text-muted-foreground">Revenue: <span className="font-semibold text-primary">â‚¹{(u.revenue / 1000).toFixed(0)}k</span></span>
                     </div>
                   </div>
                 ))}
@@ -755,7 +821,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
         </TabsContent>
       </Tabs>
 
-      {/* ── Dialogs ── */}
+      {/* â”€â”€ Dialogs â”€â”€ */}
       <Dialog open={showInstForm} onOpenChange={(o) => { setShowInstForm(o); if (!o) setEditInstitution(null); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editInstitution ? "Edit" : "Add"} Institution</DialogTitle></DialogHeader>
@@ -820,7 +886,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
                 <div><span className="text-muted-foreground">Stage:</span> <StatusPill value={drillInstitution.pipelineStage} /></div>
                 <div><span className="text-muted-foreground">Executive:</span> <span className="font-medium">{userLabelById(drillInstitution.assignedTo)}</span></div>
                 <div className="col-span-2"><span className="text-muted-foreground">Decision Maker:</span> <span className="font-medium">{drillInstitution.decisionMaker}</span></div>
-                <div className="col-span-2"><span className="text-muted-foreground">Phone:</span> {drillInstitution.phone} · <span className="text-muted-foreground">Email:</span> {drillInstitution.email}</div>
+                <div className="col-span-2"><span className="text-muted-foreground">Phone:</span> {drillInstitution.phone} Â· <span className="text-muted-foreground">Email:</span> {drillInstitution.email}</div>
                 <div className="col-span-full"><span className="text-muted-foreground">Address:</span> {drillInstitution.address}</div>
                 {drillInstitution.notes && <div className="col-span-full"><span className="text-muted-foreground">Notes:</span> {drillInstitution.notes}</div>}
               </div>
@@ -829,7 +895,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
                 <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-2">Visits</h4>
                 {data.visits.filter((v) => v.institutionId === drillInstitution.id).map((v) => (
                   <div key={v.id} className="rounded-lg border p-2 mb-1 text-xs flex items-center justify-between">
-                    <span>{v.visitDate} · {v.meetingPerson}</span>
+                    <span>{v.visitDate} Â· {v.meetingPerson}</span>
                     <StatusPill value={v.interestLevel} />
                   </div>
                 ))}
@@ -840,7 +906,7 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
                 <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-2">Proposals</h4>
                 {data.proposals.filter((p) => p.institutionId === drillInstitution.id).map((p) => (
                   <div key={p.id} className="rounded-lg border p-2 mb-1 text-xs flex items-center justify-between">
-                    <span>{p.proposalType} · ₹{p.amount.toLocaleString()}</span>
+                    <span>{p.proposalType} Â· â‚¹{p.amount.toLocaleString()}</span>
                     <StatusPill value={p.status} />
                   </div>
                 ))}
@@ -853,3 +919,6 @@ export function AllianceModule({ scope, executiveId, initialTab, initialAction, 
     </div>
   );
 }
+
+
+

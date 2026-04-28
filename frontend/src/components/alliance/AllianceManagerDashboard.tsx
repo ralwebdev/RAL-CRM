@@ -2,7 +2,7 @@
  * Alliance Manager — Premium Dashboard
  * Drilldown KPI cards, clickable funnel, leaderboard, district heatmap, at-risk accounts.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Building2, Calendar, FileText, Handshake, TrendingUp, Clock, Trophy, AlertTriangle, MapPin, Sparkles,
@@ -16,17 +16,37 @@ import { PendingApprovalsWidget } from "./ApprovalCenter";
 import {
   KpiCard, NudgeBanner, GlobalFilterBar, useAllianceData, defaultFilters, todayIso, daysBetween, ProgressRing,
 } from "./AllianceShell";
-import { allianceUsers } from "@/lib/alliance-data";
+import { syncAllianceStoreFromBackend, type AllianceDirectoryUser } from "@/lib/alliance-api";
 import { PIPELINE_STAGES } from "@/lib/alliance-types";
 import type { AllianceFilters } from "./AllianceShell";
-
-const execList = allianceUsers.filter((u) => u.role === "alliance_executive").map((u) => ({ id: u.id, label: u.name }));
-const userLabel = (id: string) => allianceUsers.find((u) => u.id === id)?.name ?? id;
 
 export function AllianceManagerDashboard() {
   const navigate = useNavigate();
   const [filters, setFilters] = useState<AllianceFilters>(defaultFilters);
+  const [directoryUsers, setDirectoryUsers] = useState<AllianceDirectoryUser[]>([]);
   const data = useAllianceData({ scope: "manager", filters });
+
+  useEffect(() => {
+    let alive = true;
+    syncAllianceStoreFromBackend()
+      .then(({ users }) => {
+        if (alive) setDirectoryUsers(users);
+      })
+      .catch(() => {
+        // keep cached labels from current render if backend unavailable
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const execList = useMemo(
+    () => directoryUsers.filter((u) => u.role === "alliance_executive").map((u) => ({ id: u.id, label: u.name })),
+    [directoryUsers],
+  );
+
+  const userLabel = (id: string) => directoryUsers.find((u) => u.id === id)?.name ?? id;
 
   // Previous-period comparison (for trend %)
   const prevFilters = useMemo<AllianceFilters>(() => {

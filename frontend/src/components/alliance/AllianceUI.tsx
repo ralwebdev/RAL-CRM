@@ -166,7 +166,7 @@ export interface FieldConfig {
 interface FormEngineProps {
   fields: FieldConfig[];
   initial?: Record<string, unknown>;
-  onSubmit: (values: Record<string, unknown>) => void;
+  onSubmit: (values: Record<string, unknown>) => void | Promise<void>;
   onCancel: () => void;
   submitLabel?: string;
 }
@@ -178,6 +178,7 @@ export function FormEngine({ fields, initial = {}, onSubmit, onCancel, submitLab
     return v;
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
 
   const set = (k: string, v: unknown) => {
     setValues((prev) => ({ ...prev, [k]: v }));
@@ -196,11 +197,16 @@ export function FormEngine({ fields, initial = {}, onSubmit, onCancel, submitLab
     return Object.keys(errs).length === 0;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validate()) return;
     const out: Record<string, unknown> = { ...values };
     fields.forEach((f) => { if (f.type === "number") out[f.key] = Number(out[f.key]) || 0; });
-    onSubmit(out);
+    setSubmitting(true);
+    try {
+      await onSubmit(out);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -238,8 +244,10 @@ export function FormEngine({ fields, initial = {}, onSubmit, onCancel, submitLab
         ))}
       </div>
       <div className="flex justify-end gap-2 pt-2">
-        <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
-        <Button size="sm" onClick={handleSubmit}>{submitLabel}</Button>
+        <Button variant="ghost" size="sm" onClick={onCancel} disabled={submitting}>Cancel</Button>
+        <Button size="sm" onClick={() => void handleSubmit()} disabled={submitting}>
+          {submitting ? "Saving..." : submitLabel}
+        </Button>
       </div>
     </div>
   );

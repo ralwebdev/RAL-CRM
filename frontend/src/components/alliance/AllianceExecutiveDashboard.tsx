@@ -13,7 +13,6 @@ import { useAuth } from "@/lib/auth-context";
 import {
   KpiCard, NudgeBanner, useAllianceData, useStreak, ProgressRing, todayIso, daysBetween,
 } from "./AllianceShell";
-import { allianceStore } from "@/lib/alliance-data";
 import { ActivityTimeline } from "./AllianceUI";
 import { PendingApprovalsWidget } from "./ApprovalCenter";
 import type { ActivityItem } from "./AllianceUI";

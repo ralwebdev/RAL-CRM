@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { allianceStore } from "@/lib/alliance-data";
+import { syncAllianceStoreFromBackend } from "@/lib/alliance-api";
 import { INSTITUTION_TYPES, PIPELINE_STAGES } from "@/lib/alliance-types";
 import type {
   Institution, AllianceVisit, AllianceTask, AllianceProposal, AllianceEvent, AllianceExpense, AllianceContact,
@@ -74,8 +75,26 @@ export function useAllianceData(opts: {
   version?: number;
 }): ScopedData {
   const { scope, executiveId, filters, version } = opts;
+  const [syncedVersion, setSyncedVersion] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    syncAllianceStoreFromBackend()
+      .then(() => {
+        if (alive) setSyncedVersion((v) => v + 1);
+      })
+      .catch(() => {
+        // Keep existing local cache if backend is unavailable.
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [version]);
+
   return useMemo(() => {
     void version;
+    void syncedVersion;
     const allInst = allianceStore.getInstitutions();
     const allVisits = allianceStore.getVisits();
     const allTasks = allianceStore.getTasks();
@@ -116,7 +135,7 @@ export function useAllianceData(opts: {
         : allExp.filter((e) => ids.has(e.institutionId)),
       contacts: allContacts.filter((c) => ids.has(c.institutionId)),
     };
-  }, [scope, executiveId, filters, version]);
+  }, [scope, executiveId, filters, version, syncedVersion]);
 }
 
 /* ───── KpiCard ───── */
@@ -252,10 +271,7 @@ interface FilterBarProps {
   showExecutive?: boolean;
 }
 export function GlobalFilterBar({ filters, onChange, executives, showExecutive = true }: FilterBarProps) {
-  const districts = useMemo(() => {
-    const set = new Set(allianceStore.getInstitutions().map((i) => i.district).filter(Boolean));
-    return Array.from(set).sort();
-  }, []);
+  const districts = Array.from(new Set(allianceStore.getInstitutions().map((i) => i.district).filter(Boolean))).sort();
   const update = (patch: Partial<AllianceFilters>) => onChange({ ...filters, ...patch });
 
   return (

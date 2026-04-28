@@ -120,9 +120,10 @@ export const getVisits = async (req, res) => {
 // @access  Private
 export const createVisit = async (req, res) => {
   try {
+    const canAssignExecutive = ['alliance_manager', 'admin', 'owner'].includes(req.user.role);
     const visit = new AllianceVisit({
       ...req.body,
-      executiveId: req.user._id // Always recorded as the current user
+      executiveId: canAssignExecutive && req.body.executiveId ? req.body.executiveId : req.user._id
     });
     const createdVisit = await visit.save();
     res.status(201).json(createdVisit);
@@ -320,9 +321,10 @@ export const getExpenses = async (req, res) => {
 // @access  Private
 export const createExpense = async (req, res) => {
   try {
+    const canAssignExecutive = ['alliance_manager', 'admin', 'owner'].includes(req.user.role);
     const expense = new AllianceExpense({
       ...req.body,
-      executiveId: req.user._id
+      executiveId: canAssignExecutive && req.body.executiveId ? req.body.executiveId : req.user._id
     });
     const createdExpense = await expense.save();
     res.status(201).json(createdExpense);
@@ -471,6 +473,21 @@ export const actOnApproval = async (req, res) => {
         }
       } catch (err) {
         console.error('Failed to sync back to FinanceExpense:', err);
+      }
+    }
+
+    // Sync back to AllianceExpense when approvals originate from alliance module
+    if (approval.meta && approval.meta.module === 'alliance') {
+      try {
+        const allianceExpense = await AllianceExpense.findById(approval.requestId);
+        if (allianceExpense) {
+          if (toStatus === 'Approved') allianceExpense.status = 'Approved';
+          else if (toStatus === 'Rejected') allianceExpense.status = 'Rejected';
+          else if (toStatus === 'Overridden') allianceExpense.status = 'Approved';
+          await allianceExpense.save();
+        }
+      } catch (err) {
+        console.error('Failed to sync back to AllianceExpense:', err);
       }
     }
 

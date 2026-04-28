@@ -1,14 +1,16 @@
-/**
- * Institution Profile — tabbed deep-dive page.
+﻿/**
+ * Institution Profile â€” tabbed deep-dive page.
  * Route: /institutional/profile/:id
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Building2, Phone, Mail, MapPin, Users, Calendar, FileText, DollarSign, Sparkles, Upload, FileIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { allianceStore, allianceUsers } from "@/lib/alliance-data";
+import { allianceStore } from "@/lib/alliance-data";
+import { api } from "@/lib/api";
+import { syncAllianceStoreFromBackend, type AllianceDirectoryUser } from "@/lib/alliance-api";
 import { ActivityTimeline, StatusPill } from "@/components/alliance/AllianceUI";
 import type { ActivityItem } from "@/components/alliance/AllianceUI";
 import { KpiCard, todayIso, daysBetween, confetti } from "@/components/alliance/AllianceShell";
@@ -18,8 +20,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "sonner";
 
-const userLabel = (id: string) => allianceUsers.find((u) => u.id === id)?.name ?? id;
-
 export default function AllianceInstitutionProfile() {
   const { id } = useParams<{ id: string }>();
   const { currentUser } = useAuth();
@@ -27,7 +27,27 @@ export default function AllianceInstitutionProfile() {
   const backTo = isAllianceRole ? "/alliances" : "/institutional";
   const backLabel = isAllianceRole ? "Back to Industry Alliances" : "Back to Institutional Sales";
   const [version, setVersion] = useState(0);
+  const [directoryUsers, setDirectoryUsers] = useState<AllianceDirectoryUser[]>([]);
   const bump = () => setVersion((v) => v + 1);
+
+  useEffect(() => {
+    let alive = true;
+    syncAllianceStoreFromBackend()
+      .then(({ users }) => {
+        if (!alive) return;
+        setDirectoryUsers(users);
+        bump();
+      })
+      .catch(() => {
+        // keep local cache if backend is unreachable
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const userLabel = (userId: string) => directoryUsers.find((u) => u.id === userId)?.name ?? userId;
 
   const inst = useMemo(() => {
     void version;
@@ -44,7 +64,7 @@ export default function AllianceInstitutionProfile() {
   const lastVisit = visits[0];
   const daysSinceVisit = lastVisit ? daysBetween(todayIso(), lastVisit.visitDate) : null;
 
-  // Best next step nudge (always called — guards against missing inst)
+  // Best next step nudge (always called â€” guards against missing inst)
   const nextStep = useMemo(() => {
     if (!inst) return "";
     if (inst.pipelineStage === "Identified") return "Schedule first contact call.";
@@ -60,9 +80,9 @@ export default function AllianceInstitutionProfile() {
   const activityItems = useMemo<ActivityItem[]>(() => {
     const items: ActivityItem[] = [];
     visits.forEach((v) => items.push({ id: `v-${v.id}`, title: `Visit logged`, description: v.summary, timestamp: v.visitDate, badge: v.interestLevel }));
-    proposals.forEach((p) => items.push({ id: `p-${p.id}`, title: `${p.proposalType}`, description: `₹${p.amount.toLocaleString()}`, timestamp: p.sentDate, badge: p.status }));
+    proposals.forEach((p) => items.push({ id: `p-${p.id}`, title: `${p.proposalType}`, description: `â‚¹${p.amount.toLocaleString()}`, timestamp: p.sentDate, badge: p.status }));
     tasks.forEach((t) => items.push({ id: `t-${t.id}`, title: t.title, description: `Due ${t.dueDate}`, timestamp: t.createdAt, badge: t.status }));
-    events.forEach((e) => items.push({ id: `e-${e.id}`, title: e.eventName, description: `${e.attendees} attendees · ${e.leadsGenerated} leads`, timestamp: e.eventDate, badge: e.eventType }));
+    events.forEach((e) => items.push({ id: `e-${e.id}`, title: e.eventName, description: `${e.attendees} attendees Â· ${e.leadsGenerated} leads`, timestamp: e.eventDate, badge: e.eventType }));
     return items.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   }, [visits, proposals, tasks, events]);
 
@@ -77,16 +97,20 @@ export default function AllianceInstitutionProfile() {
     );
   }
 
-  const updateStage = (newStage: AlliancePipelineStage) => {
-    const all = allianceStore.getInstitutions();
-    allianceStore.saveInstitutions(all.map((i) => i.id === inst.id ? { ...i, pipelineStage: newStage } : i));
-    if (newStage === "MoU Signed") {
-      confetti();
-      toast.success("🎉 MoU signed! Great win.");
-    } else {
-      toast.success(`Moved to ${newStage}.`);
+  const updateStage = async (newStage: AlliancePipelineStage) => {
+    try {
+      await api.put(`/api/alliances/institutions/${inst.id}`, { pipelineStage: newStage });
+      await syncAllianceStoreFromBackend({ force: true });
+      if (newStage === "MoU Signed") {
+        confetti();
+        toast.success("MoU signed. Great win.");
+      } else {
+        toast.success(`Moved to ${newStage}.`);
+      }
+      bump();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to update stage.");
     }
-    bump();
   };
 
   return (
@@ -102,7 +126,7 @@ export default function AllianceInstitutionProfile() {
               <h1 className="text-xl sm:text-2xl font-bold text-foreground">{inst.name}</h1>
               <StatusPill value={inst.priority} />
             </div>
-            <p className="text-xs text-muted-foreground mt-1 font-mono">{inst.institutionId} · {inst.type} · {inst.boardUniversity}</p>
+            <p className="text-xs text-muted-foreground mt-1 font-mono">{inst.institutionId} Â· {inst.type} Â· {inst.boardUniversity}</p>
             <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
               <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" />{inst.city}, {inst.district}</span>
               <span className="inline-flex items-center gap-1"><Users className="h-3 w-3" />{inst.studentStrength.toLocaleString()} students</span>
@@ -132,7 +156,7 @@ export default function AllianceInstitutionProfile() {
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <KpiCard title="Visits" value={visits.length} icon={<Calendar className="h-5 w-5" />} microcopy={daysSinceVisit !== null ? `Last visit ${daysSinceVisit}d ago` : "No visits yet"} />
         <KpiCard title="Proposals" value={proposals.length} icon={<FileText className="h-5 w-5" />} microcopy="Including drafts." />
-        <KpiCard title="Approved Revenue" value={`₹${totalRevenue.toLocaleString()}`} icon={<DollarSign className="h-5 w-5" />} accent="success" />
+        <KpiCard title="Approved Revenue" value={`â‚¹${totalRevenue.toLocaleString()}`} icon={<DollarSign className="h-5 w-5" />} accent="success" />
         <KpiCard title="Owner" value={userLabel(inst.assignedTo)} icon={<Users className="h-5 w-5" />} microcopy="Account executive." />
       </div>
 
@@ -207,7 +231,7 @@ export default function AllianceInstitutionProfile() {
                     {p.notes && <p className="text-xs text-muted-foreground mt-1">{p.notes}</p>}
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-bold text-success">₹{p.amount.toLocaleString()}</p>
+                    <p className="text-sm font-bold text-success">â‚¹{p.amount.toLocaleString()}</p>
                     <StatusPill value={p.status} />
                   </div>
                 </div>
@@ -222,15 +246,15 @@ export default function AllianceInstitutionProfile() {
             <div className="grid grid-cols-3 gap-3 text-center">
               <div className="rounded-md border p-3">
                 <p className="text-[10px] uppercase text-muted-foreground">Approved</p>
-                <p className="text-lg font-bold text-success">₹{totalRevenue.toLocaleString()}</p>
+                <p className="text-lg font-bold text-success">â‚¹{totalRevenue.toLocaleString()}</p>
               </div>
               <div className="rounded-md border p-3">
                 <p className="text-[10px] uppercase text-muted-foreground">Pending</p>
-                <p className="text-lg font-bold text-warning">₹{proposals.filter((p) => p.status === "Sent" || p.status === "Under Review").reduce((s, p) => s + p.amount, 0).toLocaleString()}</p>
+                <p className="text-lg font-bold text-warning">â‚¹{proposals.filter((p) => p.status === "Sent" || p.status === "Under Review").reduce((s, p) => s + p.amount, 0).toLocaleString()}</p>
               </div>
               <div className="rounded-md border p-3">
                 <p className="text-[10px] uppercase text-muted-foreground">Lost</p>
-                <p className="text-lg font-bold text-destructive">₹{proposals.filter((p) => p.status === "Rejected").reduce((s, p) => s + p.amount, 0).toLocaleString()}</p>
+                <p className="text-lg font-bold text-destructive">â‚¹{proposals.filter((p) => p.status === "Rejected").reduce((s, p) => s + p.amount, 0).toLocaleString()}</p>
               </div>
             </div>
           </div>
@@ -247,3 +271,4 @@ export default function AllianceInstitutionProfile() {
     </div>
   );
 }
+

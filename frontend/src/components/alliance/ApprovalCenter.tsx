@@ -1,12 +1,4 @@
-/**
- * Universal Approval Center — used by all roles.
- * - Executive: "My Requests" tracker
- * - Manager: Team queue (executive submissions) + My Submissions to admin
- * - Admin/Owner: Global Approval Center with override + bulk actions
- *
- * Reuses the universal action drawer for Approve/Reject/Hold/Override.
- */
-import { useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2, XCircle, PauseCircle, ShieldAlert, Clock, Sparkles, Receipt,
   CheckSquare, Square, Download, Filter,
@@ -19,14 +11,59 @@ import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/lib/auth-context";
-import {
-  approvalStore, approvalsForActor, pendingForRole, avgApprovalHours, hoursSince, canOverride,
-  type ApprovalRequest, type ApprovalStatus, type ApprovalAction, type ApprovalRequestType,
-} from "@/lib/approvals";
-import { allianceStore, downloadCSV } from "@/lib/alliance-data";
+import { api } from "@/lib/api";
+import { downloadCSV } from "@/lib/alliance-data";
+import { syncAllianceStoreFromBackend } from "@/lib/alliance-api";
 import { toast } from "sonner";
 import { confetti } from "./AllianceShell";
 import { cn } from "@/lib/utils";
+
+type ApprovalStatus = "Pending" | "Approved" | "Rejected" | "Hold" | "Overridden" | "Resubmitted";
+type ApprovalAction = "Approve" | "Reject" | "Hold" | "Override" | "Resubmit";
+type ApprovalRequestType =
+  | "Expense Bill"
+  | "Task Completion"
+  | "Task Extension"
+  | "Travel Reimbursement"
+  | "Visit Claim"
+  | "Custom Request"
+  | "Proposal Approval"
+  | "Invoice Dispatch";
+
+interface ApprovalRequest {
+  id: string;
+  requestId: string;
+  requestType: ApprovalRequestType;
+  title: string;
+  amount?: number;
+  priority: "Low" | "Medium" | "High" | "Urgent";
+  notes?: string;
+  meta?: Record<string, unknown>;
+  submittedBy: string;
+  submittedByName?: string;
+  submittedRole: string;
+  currentApproverRole: string;
+  currentApproverId?: string;
+  currentApproverName?: string;
+  status: ApprovalStatus;
+  nextReviewDate?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ApprovalLog {
+  id: string;
+  approvalId: string;
+  approvalTitle?: string;
+  action: string;
+  fromStatus: string;
+  toStatus: string;
+  actedBy?: string;
+  actedByName?: string;
+  actedRole: string;
+  comment?: string;
+  timestamp: string;
+}
 
 const STATUS_STYLES: Record<ApprovalStatus, string> = {
   Pending: "bg-info/10 text-info",
@@ -43,7 +80,7 @@ function StatusChip({ value }: { value: ApprovalStatus }) {
       key={value}
       className={cn(
         "inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-medium whitespace-nowrap animate-in fade-in zoom-in-95 duration-300",
-        STATUS_STYLES[value]
+        STATUS_STYLES[value],
       )}
     >
       {value}
@@ -51,12 +88,68 @@ function StatusChip({ value }: { value: ApprovalStatus }) {
   );
 }
 
-const REQUEST_TYPES: ApprovalRequestType[] = ["Expense Bill", "Task Completion", "Task Extension", "Travel Reimbursement", "Visit Claim", "Custom Request", "Proposal Approval"];
+const REQUEST_TYPES: ApprovalRequestType[] = [
+  "Expense Bill",
+  "Task Completion",
+  "Task Extension",
+  "Travel Reimbursement",
+  "Visit Claim",
+  "Custom Request",
+  "Proposal Approval",
+  "Invoice Dispatch",
+];
+
+const hoursSince = (iso: string) => Math.floor((Date.now() - new Date(iso).getTime()) / 3600000);
+const isPendingLike = (status: ApprovalStatus) => status === "Pending" || status === "Resubmitted" || status === "Hold";
+
+const pickId = (value: any) => {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  return String(value._id || value.id || "");
+};
+
+const mapApproval = (row: any): ApprovalRequest => ({
+  id: pickId(row._id || row.id),
+  requestId: String(row.requestId || ""),
+  requestType: row.requestType,
+  title: String(row.title || ""),
+  amount: row.amount == null ? undefined : Number(row.amount),
+  priority: row.priority || "Medium",
+  notes: row.notes || "",
+  meta: row.meta || {},
+  submittedBy: pickId(row.submittedBy),
+  submittedByName: typeof row.submittedBy === "object" ? row.submittedBy?.name : undefined,
+  submittedRole: String(row.submittedRole || ""),
+  currentApproverRole: String(row.currentApproverRole || ""),
+  currentApproverId: pickId(row.currentApproverId),
+  currentApproverName: typeof row.currentApproverId === "object" ? row.currentApproverId?.name : undefined,
+  status: row.status,
+  nextReviewDate: row.nextReviewDate ? String(row.nextReviewDate).split("T")[0] : undefined,
+  createdAt: String(row.createdAt || ""),
+  updatedAt: String(row.updatedAt || ""),
+});
+
+const mapLog = (row: any): ApprovalLog => ({
+  id: pickId(row._id || row.id),
+  approvalId: pickId(row.approvalId),
+  approvalTitle: typeof row.approvalId === "object" ? row.approvalId?.title : undefined,
+  action: String(row.action || ""),
+  fromStatus: String(row.fromStatus || ""),
+  toStatus: String(row.toStatus || ""),
+  actedBy: pickId(row.actedBy),
+  actedByName: typeof row.actedBy === "object" ? row.actedBy?.name : undefined,
+  actedRole: String(row.actedRole || ""),
+  comment: row.comment || "",
+  timestamp: String(row.createdAt || row.timestamp || ""),
+});
 
 export function ApprovalCenter() {
   const { currentUser, allUsers } = useAuth();
   const [version, setVersion] = useState(0);
-  const [actionTarget, setActionTarget] = useState<{ req: ApprovalRequest; action: Exclude<ApprovalAction, "Submit"> } | null>(null);
+  const [all, setAll] = useState<ApprovalRequest[]>([]);
+  const [logs, setLogs] = useState<ApprovalLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [actionTarget, setActionTarget] = useState<{ req: ApprovalRequest; action: ApprovalAction } | null>(null);
   const [comment, setComment] = useState("");
   const [holdDate, setHoldDate] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -70,101 +163,163 @@ export function ApprovalCenter() {
   const isMgr = role === "alliance_manager";
   const isAdmin = role === "admin" || role === "owner";
 
-  const userLabel = (id?: string) => allUsers.find((u) => u.id === id)?.name ?? id ?? "—";
+  const userLabel = (id?: string) => allUsers.find((u) => u.id === id)?.name ?? id ?? "-";
 
-  const all = useMemo(() => { void version; return userId ? approvalsForActor(userId, role) : []; }, [userId, role, version]);
-  const pending = useMemo(() => { void version; return userId ? pendingForRole(userId, role) : []; }, [userId, role, version]);
-  const logs = useMemo(() => { void version; return approvalStore.logs(); }, [version]);
+  const loadData = async () => {
+    if (!currentUser) return;
+    setLoading(true);
+    try {
+      const [approvalsRes, logsRes] = await Promise.all([
+        api.get("/api/alliances/approvals"),
+        api.get("/api/alliances/approvals/logs"),
+      ]);
+      setAll((approvalsRes.data || []).map(mapApproval));
+      setLogs((logsRes.data || []).map(mapLog));
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to load approvals.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void version;
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, currentUser?.id, currentUser?.role]);
+
+  const pending = useMemo(() => {
+    if (isExec) return all.filter((a) => a.submittedBy === userId && isPendingLike(a.status));
+    if (isMgr) return all.filter((a) => a.currentApproverRole === role && isPendingLike(a.status));
+    return all.filter((a) => isPendingLike(a.status));
+  }, [all, isExec, isMgr, role, userId]);
+
   const filtered = useMemo(() => {
     return all.filter((a) => {
       if (filterStatus !== "all" && a.status !== filterStatus) return false;
       if (filterType !== "all" && a.requestType !== filterType) return false;
       if (search) {
-        const sender = allUsers.find((u) => u.id === a.submittedBy)?.name ?? "";
-        if (!a.title.toLowerCase().includes(search.toLowerCase()) && !sender.toLowerCase().includes(search.toLowerCase())) return false;
+        const sender = a.submittedByName || userLabel(a.submittedBy);
+        const q = search.toLowerCase();
+        if (!a.title.toLowerCase().includes(q) && !sender.toLowerCase().includes(q)) return false;
       }
       return true;
     });
-  }, [all, filterStatus, filterType, search, allUsers]);
+  }, [all, filterStatus, filterType, search]);
 
   if (!currentUser) return null;
 
-  // KPIs
   const approvedThisWeek = all.filter((a) => a.status === "Approved" && hoursSince(a.updatedAt) <= 168).length;
   const heldCount = all.filter((a) => a.status === "Hold").length;
   const rejectedCount = all.filter((a) => a.status === "Rejected").length;
-  const avgHrs = avgApprovalHours(all);
   const overridesCount = all.filter((a) => a.status === "Overridden").length;
   const totalApprovedAmount = all.filter((a) => a.status === "Approved").reduce((s, a) => s + (a.amount ?? 0), 0);
+  const avgHrs = (() => {
+    const closed = all.filter((a) => a.status === "Approved" || a.status === "Rejected");
+    if (!closed.length) return 0;
+    const total = closed.reduce((s, a) => s + (new Date(a.updatedAt).getTime() - new Date(a.createdAt).getTime()), 0);
+    return Math.round(total / closed.length / 3600000);
+  })();
 
-  // Behavioral nudges
   const urgent = pending.filter((p) => hoursSince(p.createdAt) >= 24).length;
 
-  function syncBack(req: ApprovalRequest, status: ApprovalStatus) {
-    // Mirror Approved/Rejected back to expense source records
-    if (req.requestType === "Expense Bill" || req.requestType === "Travel Reimbursement" || req.requestType === "Visit Claim") {
-      const exps = allianceStore.getExpenses();
-      const target = exps.find((e) => e.id === req.requestId);
-      if (target) {
-        const next = status === "Approved" ? "Approved" : status === "Rejected" ? "Rejected" : target.status;
-        allianceStore.saveExpenses(exps.map((e) => e.id === req.requestId ? { ...e, status: next as typeof e.status } : e));
-      }
-    }
-  }
+  const performAction = async (req: ApprovalRequest, action: ApprovalAction, opts?: { silent?: boolean; commentText?: string; nextReviewDate?: string }) => {
+    const resolvedComment = opts?.commentText ?? comment;
+    const resolvedHoldDate = opts?.nextReviewDate ?? holdDate;
 
-  const performAction = (req: ApprovalRequest, action: Exclude<ApprovalAction, "Submit">, opts?: { silent?: boolean }) => {
-    if (action === "Reject" && !comment.trim() && !opts?.silent) { toast.error("A reason is required to reject."); return false; }
-    if (action === "Hold" && !comment.trim() && !opts?.silent) { toast.error("A reason is required to hold."); return false; }
-    if (action === "Override" && !comment.trim() && !opts?.silent) { toast.error("Override requires a justification."); return false; }
-    const result = approvalStore.act(req.id, {
-      action, actorId: userId, actorRole: role, comment: comment || undefined,
-      nextReviewDate: action === "Hold" ? holdDate || undefined : undefined,
-    });
-    if (!result) { if (!opts?.silent) toast.error("You cannot act on this request."); return false; }
-    syncBack(result, result.status);
-    if (action === "Approve" && (result.amount ?? 0) >= 5000) confetti();
-    if (!opts?.silent) toast.success(`${action}d successfully.`);
-    return true;
+    if (action === "Reject" && !resolvedComment.trim() && !opts?.silent) {
+      toast.error("A reason is required to reject.");
+      return false;
+    }
+    if (action === "Hold" && !resolvedComment.trim() && !opts?.silent) {
+      toast.error("A reason is required to hold.");
+      return false;
+    }
+    if (action === "Override" && !resolvedComment.trim() && !opts?.silent) {
+      toast.error("Override requires a justification.");
+      return false;
+    }
+
+    try {
+      await api.put(`/api/alliances/approvals/${req.id}`, {
+        action,
+        comment: resolvedComment || undefined,
+        nextReviewDate: action === "Hold" ? resolvedHoldDate || undefined : undefined,
+      });
+      if (action === "Approve" && (req.amount ?? 0) >= 5000) confetti();
+      await syncAllianceStoreFromBackend({ force: true });
+      if (!opts?.silent) toast.success(`${action}d successfully.`);
+      return true;
+    } catch (err: any) {
+      if (!opts?.silent) toast.error(err?.response?.data?.message || "Action failed.");
+      return false;
+    }
   };
 
-  const closeDrawer = () => { setActionTarget(null); setComment(""); setHoldDate(""); };
-  const submitDrawer = () => {
+  const closeDrawer = () => {
+    setActionTarget(null);
+    setComment("");
+    setHoldDate("");
+  };
+
+  const submitDrawer = async () => {
     if (!actionTarget) return;
-    if (performAction(actionTarget.req, actionTarget.action)) {
+    const ok = await performAction(actionTarget.req, actionTarget.action);
+    if (ok) {
       closeDrawer();
       setVersion((v) => v + 1);
     }
   };
 
-  const bulkAct = (action: "Approve" | "Hold") => {
-    if (!selected.size) { toast.error("Select at least one request."); return; }
+  const bulkAct = async (action: "Approve" | "Hold") => {
+    if (!selected.size) {
+      toast.error("Select at least one request.");
+      return;
+    }
+
     let ok = 0;
-    selected.forEach((id) => {
+    for (const id of selected) {
       const req = all.find((a) => a.id === id);
-      if (!req) return;
-      const r = approvalStore.act(id, { action, actorId: userId, actorRole: role, comment: action === "Hold" ? "Bulk hold by admin" : undefined });
-      if (r) { syncBack(r, r.status); ok += 1; }
-    });
+      if (!req) continue;
+      const done = await performAction(req, action, {
+        silent: true,
+        commentText: action === "Hold" ? "Bulk hold by admin" : undefined,
+      });
+      if (done) ok += 1;
+    }
+
     toast.success(`${action}d ${ok} of ${selected.size} requests.`);
     setSelected(new Set());
     setVersion((v) => v + 1);
   };
 
   const exportCsv = () => {
-    downloadCSV("approvals.csv", filtered.map((a) => ({
-      Title: a.title, Type: a.requestType, SubmittedBy: userLabel(a.submittedBy), Role: a.submittedRole,
-      Amount: a.amount ?? "", Status: a.status, Priority: a.priority,
-      Approver: a.currentApproverRole, Created: a.createdAt, Updated: a.updatedAt, Notes: a.notes ?? "",
-    })));
+    downloadCSV(
+      "approvals.csv",
+      filtered.map((a) => ({
+        Title: a.title,
+        Type: a.requestType,
+        SubmittedBy: a.submittedByName || userLabel(a.submittedBy),
+        Role: a.submittedRole,
+        Amount: a.amount ?? "",
+        Status: a.status,
+        Priority: a.priority,
+        Approver: a.currentApproverRole,
+        Created: a.createdAt,
+        Updated: a.updatedAt,
+        Notes: a.notes ?? "",
+      })),
+    );
   };
 
-  const toggleSelect = (id: string) => setSelected((s) => {
-    const n = new Set(s);
-    if (n.has(id)) n.delete(id); else n.add(id);
-    return n;
-  });
+  const toggleSelect = (id: string) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
 
-  // ── KPI cards ──
   const kpiCards = [
     isExec
       ? [
@@ -182,26 +337,42 @@ export function ApprovalCenter() {
           { label: "Avg Approval (hrs)", value: avgHrs, icon: <Sparkles className="h-4 w-4" />, accent: "default" as const },
         ]
       : [
-          { label: "Pending Manager Reqs", value: all.filter((a) => a.submittedRole !== "alliance_executive" && (a.status === "Pending" || a.status === "Resubmitted")).length, icon: <Clock className="h-4 w-4" />, accent: "info" as const },
-          { label: "Pending Exec Reqs", value: all.filter((a) => a.submittedRole === "alliance_executive" && (a.status === "Pending" || a.status === "Resubmitted")).length, icon: <Clock className="h-4 w-4" />, accent: "info" as const },
+          {
+            label: "Pending Manager Reqs",
+            value: all.filter((a) => a.submittedRole !== "alliance_executive" && isPendingLike(a.status)).length,
+            icon: <Clock className="h-4 w-4" />,
+            accent: "info" as const,
+          },
+          {
+            label: "Pending Exec Reqs",
+            value: all.filter((a) => a.submittedRole === "alliance_executive" && isPendingLike(a.status)).length,
+            icon: <Clock className="h-4 w-4" />,
+            accent: "info" as const,
+          },
           { label: "Held Cases", value: heldCount, icon: <PauseCircle className="h-4 w-4" />, accent: "warning" as const },
-          { label: "Total Approved ₹", value: `₹${(totalApprovedAmount/1000).toFixed(0)}k`, icon: <CheckCircle2 className="h-4 w-4" />, accent: "success" as const },
+          { label: "Total Approved INR", value: `INR ${(totalApprovedAmount / 1000).toFixed(0)}k`, icon: <CheckCircle2 className="h-4 w-4" />, accent: "success" as const },
           { label: "Overrides", value: overridesCount, icon: <ShieldAlert className="h-4 w-4" />, accent: "danger" as const },
         ],
   ][0];
 
   const accentRing = (a: string) =>
-    a === "danger" ? "border-l-destructive" :
-    a === "warning" ? "border-l-warning" :
-    a === "success" ? "border-l-success" :
-    a === "info" ? "border-l-info" : "border-l-primary";
+    a === "danger"
+      ? "border-l-destructive"
+      : a === "warning"
+      ? "border-l-warning"
+      : a === "success"
+      ? "border-l-success"
+      : a === "info"
+      ? "border-l-info"
+      : "border-l-primary";
 
-  // ── Action menu per row ──
   const rowActions = (req: ApprovalRequest) => {
-    const canAct = (isMgr && req.currentApproverRole === "alliance_manager" && (req.status === "Pending" || req.status === "Resubmitted" || req.status === "Hold"))
-      || (isAdmin && (req.status === "Pending" || req.status === "Resubmitted" || req.status === "Hold"));
+    const canAct =
+      (isMgr && req.currentApproverRole === "alliance_manager" && isPendingLike(req.status)) ||
+      (isAdmin && isPendingLike(req.status));
     const showOverride = isAdmin && (req.status === "Approved" || req.status === "Rejected" || req.status === "Hold");
     const canResubmit = isExec && req.submittedBy === userId && req.status === "Rejected";
+
     return (
       <div className="flex items-center gap-1 flex-wrap justify-end">
         {canAct && (
@@ -238,7 +409,6 @@ export function ApprovalCenter() {
     ? "Approve, hold or reject your executives' submissions."
     : "Override decisions, approve manager submissions, run bulk actions.";
 
-  // ── Override log (admin only) ──
   const overrideLog = logs.filter((l) => l.action === "Override").slice(0, 8);
 
   return (
@@ -251,7 +421,6 @@ export function ApprovalCenter() {
         <Button size="sm" variant="outline" onClick={exportCsv}><Download className="h-3.5 w-3.5 mr-1" /> Export</Button>
       </div>
 
-      {/* KPI strip */}
       <div className={cn("grid gap-3 grid-cols-2", isExec ? "lg:grid-cols-4" : "lg:grid-cols-5")}>
         {kpiCards.map((k) => (
           <div key={k.label} className={cn("rounded-xl bg-card p-3 shadow-card border-l-4", accentRing(k.accent))}>
@@ -264,23 +433,21 @@ export function ApprovalCenter() {
         ))}
       </div>
 
-      {/* Smart nudge */}
       {urgent > 0 && (isMgr || isAdmin) && (
         <div className="rounded-xl bg-card p-3 shadow-card border-l-4 border-l-destructive flex items-start gap-2">
           <Sparkles className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
           <p className="text-xs text-destructive font-medium">{urgent} urgent approval{urgent === 1 ? "" : "s"} pending since yesterday. Fast approvals improve field productivity.</p>
         </div>
       )}
-      {isExec && pending.length === 0 && all.length === 0 && (
+      {isExec && pending.length === 0 && all.length === 0 && !loading && (
         <div className="rounded-xl bg-card p-6 shadow-card text-center text-sm text-muted-foreground italic">
           No requests yet. Submit an expense, task or claim to start.
         </div>
       )}
 
-      {/* Filters */}
       <div className="rounded-xl bg-card p-3 shadow-card flex flex-wrap items-center gap-2">
         <Filter className="h-3.5 w-3.5 text-muted-foreground" />
-        <Input className="h-8 text-xs w-44" placeholder="Search title or person…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <Input className="h-8 text-xs w-44" placeholder="Search title or person..." value={search} onChange={(e) => setSearch(e.target.value)} />
         <Select value={filterStatus} onValueChange={setFilterStatus}>
           <SelectTrigger className="h-8 w-32 text-xs"><SelectValue placeholder="Status" /></SelectTrigger>
           <SelectContent>
@@ -305,7 +472,6 @@ export function ApprovalCenter() {
         )}
       </div>
 
-      {/* Queue table */}
       <div className="rounded-xl bg-card shadow-card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -323,7 +489,9 @@ export function ApprovalCenter() {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
+              {loading ? (
+                <tr><td colSpan={isAdmin ? 9 : 8} className="text-center text-muted-foreground italic p-6">Loading approvals...</td></tr>
+              ) : filtered.length === 0 ? (
                 <tr><td colSpan={isAdmin ? 9 : 8} className="text-center text-muted-foreground italic p-6">No pending approvals. Great control.</td></tr>
               ) : filtered.map((req) => (
                 <tr key={req.id} className="border-b last:border-0 hover:bg-muted/30 transition">
@@ -340,10 +508,10 @@ export function ApprovalCenter() {
                   </td>
                   <td className="p-2 hidden sm:table-cell"><Badge variant="outline" className="text-[10px]">{req.requestType}</Badge></td>
                   <td className="p-2">
-                    <p className="text-xs">{userLabel(req.submittedBy)}</p>
+                    <p className="text-xs">{req.submittedByName || userLabel(req.submittedBy)}</p>
                     <p className="text-[10px] text-muted-foreground capitalize">{req.submittedRole.replace("_", " ")}</p>
                   </td>
-                  <td className="p-2 hidden sm:table-cell text-right tabular-nums">{req.amount ? `₹${req.amount.toLocaleString()}` : "—"}</td>
+                  <td className="p-2 hidden sm:table-cell text-right tabular-nums">{req.amount ? `INR ${req.amount.toLocaleString()}` : "-"}</td>
                   <td className="p-2"><StatusChip value={req.status} /></td>
                   <td className="p-2 hidden md:table-cell"><span className="text-[10px] capitalize text-muted-foreground">{req.currentApproverRole.replace("_", " ")}</span></td>
                   <td className="p-2 hidden lg:table-cell"><span className="text-[10px] text-muted-foreground">{hoursSince(req.createdAt)}h</span></td>
@@ -355,31 +523,26 @@ export function ApprovalCenter() {
         </div>
       </div>
 
-      {/* Override log (admin/owner) */}
       {isAdmin && overrideLog.length > 0 && (
         <div className="rounded-xl bg-card p-4 shadow-card">
           <h4 className="text-sm font-semibold text-card-foreground mb-2 flex items-center gap-1.5"><ShieldAlert className="h-4 w-4 text-foreground" /> Override Log</h4>
           <div className="space-y-1.5">
-            {overrideLog.map((l) => {
-              const req = all.find((a) => a.id === l.approvalId);
-              return (
-                <div key={l.id} className="flex items-center justify-between rounded-md border p-2 text-xs">
-                  <div className="min-w-0">
-                    <p className="font-medium truncate">{req?.title ?? l.approvalId}</p>
-                    <p className="text-[10px] text-muted-foreground">{l.fromStatus} → {l.toStatus} · {l.comment ?? "no comment"}</p>
-                  </div>
-                  <div className="text-right ml-2 flex-shrink-0">
-                    <p className="text-[10px] text-muted-foreground">{userLabel(l.actedBy)}</p>
-                    <p className="text-[10px] text-muted-foreground">{new Date(l.timestamp).toLocaleString()}</p>
-                  </div>
+            {overrideLog.map((l) => (
+              <div key={l.id} className="flex items-center justify-between rounded-md border p-2 text-xs">
+                <div className="min-w-0">
+                  <p className="font-medium truncate">{l.approvalTitle ?? l.approvalId}</p>
+                  <p className="text-[10px] text-muted-foreground">{l.fromStatus} {"->"} {l.toStatus} {"-"} {l.comment ?? "no comment"}</p>
                 </div>
-              );
-            })}
+                <div className="text-right ml-2 flex-shrink-0">
+                  <p className="text-[10px] text-muted-foreground">{l.actedByName || userLabel(l.actedBy)}</p>
+                  <p className="text-[10px] text-muted-foreground">{new Date(l.timestamp).toLocaleString()}</p>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
-      {/* Universal action drawer */}
       <Sheet open={!!actionTarget} onOpenChange={(o) => { if (!o) closeDrawer(); }}>
         <SheetContent side="right" className="w-full sm:max-w-md">
           <SheetHeader>
@@ -396,8 +559,8 @@ export function ApprovalCenter() {
             <div className="mt-4 space-y-4">
               <div className="rounded-md border p-3 bg-muted/30">
                 <p className="font-medium text-sm">{actionTarget.req.title}</p>
-                <p className="text-xs text-muted-foreground mt-1">{actionTarget.req.requestType} · {userLabel(actionTarget.req.submittedBy)}</p>
-                {actionTarget.req.amount != null && <p className="text-sm font-semibold text-primary mt-1">₹{actionTarget.req.amount.toLocaleString()}</p>}
+                <p className="text-xs text-muted-foreground mt-1">{actionTarget.req.requestType} - {actionTarget.req.submittedByName || userLabel(actionTarget.req.submittedBy)}</p>
+                {actionTarget.req.amount != null && <p className="text-sm font-semibold text-primary mt-1">INR {actionTarget.req.amount.toLocaleString()}</p>}
                 {actionTarget.req.notes && <p className="text-xs text-muted-foreground mt-2">{actionTarget.req.notes}</p>}
               </div>
 
@@ -409,10 +572,13 @@ export function ApprovalCenter() {
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
                   placeholder={
-                    actionTarget.action === "Reject" ? "Why is this rejected?" :
-                    actionTarget.action === "Hold" ? "What is pending? When to revisit?" :
-                    actionTarget.action === "Override" ? "Justification for overriding the decision" :
-                    "Optional comment"
+                    actionTarget.action === "Reject"
+                      ? "Why is this rejected?"
+                      : actionTarget.action === "Hold"
+                      ? "What is pending? When to revisit?"
+                      : actionTarget.action === "Override"
+                      ? "Justification for overriding the decision"
+                      : "Optional comment"
                   }
                   className="mt-1 text-sm"
                   rows={3}
@@ -428,12 +594,16 @@ export function ApprovalCenter() {
 
               <div className="flex items-center gap-2 justify-end pt-2">
                 <Button variant="ghost" onClick={closeDrawer}>Cancel</Button>
-                <Button onClick={submitDrawer}>
-                  {actionTarget.action === "Approve" ? "Approve Now" :
-                   actionTarget.action === "Reject" ? "Reject with Reason" :
-                   actionTarget.action === "Hold" ? "Put on Hold" :
-                   actionTarget.action === "Override" ? "Override Decision" :
-                   "Resubmit"}
+                <Button onClick={() => void submitDrawer()}>
+                  {actionTarget.action === "Approve"
+                    ? "Approve Now"
+                    : actionTarget.action === "Reject"
+                    ? "Reject with Reason"
+                    : actionTarget.action === "Hold"
+                    ? "Put on Hold"
+                    : actionTarget.action === "Override"
+                    ? "Override Decision"
+                    : "Resubmit"}
                 </Button>
               </div>
             </div>
@@ -444,12 +614,41 @@ export function ApprovalCenter() {
   );
 }
 
-/** Compact dashboard widget — used by manager/exec/admin home pages */
 export function PendingApprovalsWidget({ onOpen }: { onOpen?: () => void }) {
   const { currentUser } = useAuth();
+  const [pendingCount, setPendingCount] = useState(0);
+  const [urgentCount, setUrgentCount] = useState(0);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    let alive = true;
+
+    api
+      .get("/api/alliances/approvals")
+      .then((res) => {
+        if (!alive) return;
+        const list: ApprovalRequest[] = (res.data || []).map(mapApproval);
+        const role = currentUser.role;
+        const mine = role === "alliance_executive"
+          ? list.filter((a) => a.submittedBy === currentUser.id && isPendingLike(a.status))
+          : role === "alliance_manager"
+          ? list.filter((a) => a.currentApproverRole === role && isPendingLike(a.status))
+          : list.filter((a) => isPendingLike(a.status));
+
+        setPendingCount(mine.length);
+        setUrgentCount(mine.filter((p) => hoursSince(p.createdAt) >= 24).length);
+      })
+      .catch(() => {
+        setPendingCount(0);
+        setUrgentCount(0);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [currentUser?.id, currentUser?.role]);
+
   if (!currentUser) return null;
-  const pending = pendingForRole(currentUser.id, currentUser.role);
-  const urgent = pending.filter((p) => hoursSince(p.createdAt) >= 24).length;
   const isExec = currentUser.role === "alliance_executive";
 
   return (
@@ -458,15 +657,15 @@ export function PendingApprovalsWidget({ onOpen }: { onOpen?: () => void }) {
       onClick={onOpen}
       className={cn(
         "w-full text-left rounded-xl bg-card p-4 shadow-card border-l-4 transition hover:-translate-y-0.5 hover:shadow-md",
-        urgent > 0 ? "border-l-destructive" : pending.length > 0 ? "border-l-warning" : "border-l-success"
+        urgentCount > 0 ? "border-l-destructive" : pendingCount > 0 ? "border-l-warning" : "border-l-success",
       )}
     >
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{isExec ? "My Pending Requests" : "Pending Approvals"}</p>
-          <p className="mt-1 text-2xl font-bold text-card-foreground tabular-nums">{pending.length}</p>
+          <p className="mt-1 text-2xl font-bold text-card-foreground tabular-nums">{pendingCount}</p>
           <p className="text-[11px] text-muted-foreground mt-0.5">
-            {pending.length === 0 ? "Great control." : urgent > 0 ? `${urgent} aged 24h+` : "Up to date"}
+            {pendingCount === 0 ? "Great control." : urgentCount > 0 ? `${urgentCount} aged 24h+` : "Up to date"}
           </p>
         </div>
         <div className="rounded-lg bg-primary/10 p-2 text-primary"><Receipt className="h-5 w-5" /></div>
