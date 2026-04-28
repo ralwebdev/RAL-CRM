@@ -11,6 +11,7 @@
  * EMI late-fee engine: ₹50 / day overdue, accrued on read (no schedule mutation).
  */
 import { db } from "./db";
+import { api } from "./api";
 
 export type CollectionMode = "cash" | "upi" | "bank_transfer" | "cheque" | "card";
 
@@ -204,6 +205,65 @@ export function subscribeCollections(l: Listener) {
 
 export function getCollections(): Collection[] { return state; }
 export function resetCollections() { save(seed()); }
+
+export async function hydrateCollectionsFromBackend(): Promise<void> {
+  const response = await api.get("/api/admissions");
+  const rows = Array.isArray(response.data) ? response.data : [];
+
+  const backendCollections: Collection[] = rows.flatMap((admission: any, idx: number) => {
+    const studentId = String(admission?._id || admission?.id || `adm_${idx}`);
+    const studentName = String(admission?.studentName || "Student");
+    const courseName = String(admission?.courseSelected || "Course");
+    const studentMobile = admission?.phone ? String(admission.phone) : undefined;
+    const branch = admission?.batch ? String(admission.batch) : undefined;
+
+    const history = Array.isArray(admission?.paymentHistory) ? admission.paymentHistory : [];
+    return history.map((entry: any, hIdx: number) => {
+      const entryId = String(entry?._id || `${studentId}_${hIdx}`);
+      const collectedAt = entry?.paymentDate ? new Date(entry.paymentDate).toISOString() : new Date().toISOString();
+      const amount = Number(entry?.amountPaid || 0);
+      const modeRaw = String(entry?.paymentMode || "").toLowerCase();
+      const mode: CollectionMode =
+        modeRaw.includes("upi") ? "upi" :
+        modeRaw.includes("bank") ? "bank_transfer" :
+        modeRaw.includes("cheque") ? "cheque" :
+        modeRaw.includes("card") ? "card" :
+        "cash";
+
+      return {
+        id: `api_col_${entryId}`,
+        receiptRef: `RC-${new Date(collectedAt).getFullYear()}-${String(hIdx + 1).padStart(4, "0")}`,
+        studentId,
+        studentName,
+        studentMobile,
+        courseName,
+        branch,
+        amount,
+        mode,
+        reason: "admission_fee",
+        collectedAt,
+        collectedById: "backend",
+        collectedByName: "Backend Sync",
+        collectorRole: "admin",
+        status: "Collected",
+        txnId: entry?.referenceNumber ? String(entry.referenceNumber) : undefined,
+        invoiceRequest: { type: "none", status: "none" },
+        audit: [],
+        createdAt: collectedAt,
+      } satisfies Collection;
+    });
+  });
+
+  if (backendCollections.length > 0) {
+    const existingById = new Map(state.map((c) => [c.id, c]));
+    backendCollections.forEach((c) => {
+      if (!existingById.has(c.id)) {
+        existingById.set(c.id, c);
+      }
+    });
+    save(Array.from(existingById.values()));
+  }
+}
 
 function pushAudit(c: Collection, entry: Omit<CollectionAuditEntry, "id" | "at">) {
   c.audit = [

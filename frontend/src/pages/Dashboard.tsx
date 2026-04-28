@@ -2,8 +2,14 @@ import { store } from "@/lib/mock-data";
 import { StatCard } from "@/components/StatCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Megaphone, Users, UserPlus, TrendingUp, Activity } from "lucide-react";
+import { useEffect } from "react";
+import { syncOwnerDashboardFromBackend } from "@/lib/owner-backend-sync";
 
 export default function Dashboard() {
+  useEffect(() => {
+    void syncOwnerDashboardFromBackend().catch(() => { /* keep local fallback */ });
+  }, []);
+
   const campaigns = store.getCampaigns();
   const leads = store.getLeads();
   const admissions = store.getAdmissions();

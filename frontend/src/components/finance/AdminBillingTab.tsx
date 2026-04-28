@@ -14,7 +14,7 @@
  *   create / edit / convert / send invoices · generate PI/TI/Receipts ·
  *   change invoice numbers · delete issued invoices.
  */
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,6 +40,7 @@ import {
   verifyCollection, rejectCollection,
   adminApproveInvoiceRequest, adminRejectInvoiceRequest,
   accountsHoldRequest,
+  hydrateCollectionsFromBackend,
   type Collection,
 } from "@/lib/collection-store";
 import { LogCollectionDialog } from "@/components/counseling/LogCollectionDialog";
@@ -95,6 +96,10 @@ export function AdminBillingTab() {
   const { currentUser } = useAuth();
   const [tab, setTab] = useState("pending");
   const [logOpen, setLogOpen] = useState(false);
+
+  useEffect(() => {
+    void hydrateCollectionsFromBackend().catch(() => { /* keep local workflow if backend sync fails */ });
+  }, []);
 
   const actor = {
     id: currentUser?.id || "u_admin",

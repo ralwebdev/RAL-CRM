@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Phone, PhoneCall, Users, Target, Calendar, GraduationCap, Megaphone,
   TrendingUp, DollarSign, Activity, Shield, Clock, Star, Zap, BarChart3,
@@ -16,7 +18,15 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, AreaChart, Area
 } from "recharts";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { syncOwnerDashboardFromBackend } from "@/lib/owner-backend-sync";
+import {
+  createTelecallingUser,
+  deleteTelecallingUser,
+  fetchTelecallingUsers,
+  updateTelecallingUser,
+} from "@/lib/telecalling-api";
+import type { UserRole } from "@/lib/types";
 
 const CHART_COLORS = [
   "hsl(358, 78%, 51%)", "hsl(38, 92%, 50%)", "hsl(142, 71%, 45%)",
@@ -1324,8 +1334,92 @@ function OwnerDashboard() {
 function AdminDashboard() {
   const leads = store.getLeads();
   const admissions = store.getAdmissions();
-  const users = store.getUsers();
   const campaigns = store.getCampaigns();
+  const [users, setUsers] = useState(store.getUsers());
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [error, setError] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: "", email: "", password: "", role: "telecaller" as UserRole });
+
+  const roles: UserRole[] = [
+    "admin", "owner", "marketing_manager", "telecalling_manager", "telecaller", "counselor",
+    "alliance_manager", "alliance_executive", "accounts_manager", "accounts_executive",
+  ];
+
+  const reloadUsers = async () => {
+    setLoadingUsers(true);
+    setError("");
+    try {
+      const backendUsers = await fetchTelecallingUsers();
+      setUsers(backendUsers);
+      store.saveUsers(backendUsers);
+    } catch (e: any) {
+      setError(e?.response?.data?.message || "Failed to load users from backend.");
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  useEffect(() => {
+    void reloadUsers();
+  }, []);
+
+  const resetForm = () => {
+    setEditingId(null);
+    setForm({ name: "", email: "", password: "", role: "telecaller" });
+  };
+
+  const submitUser = async () => {
+    setError("");
+    if (!form.name.trim() || !form.email.trim()) {
+      setError("Name and email are required.");
+      return;
+    }
+    if (!editingId && !form.password.trim()) {
+      setError("Password is required for new users.");
+      return;
+    }
+
+    try {
+      if (editingId) {
+        await updateTelecallingUser(editingId, {
+          name: form.name.trim(),
+          email: form.email.trim(),
+          role: form.role,
+          password: form.password.trim() || undefined,
+        });
+      } else {
+        await createTelecallingUser({
+          name: form.name.trim(),
+          email: form.email.trim(),
+          password: form.password.trim(),
+          role: form.role,
+        });
+      }
+      resetForm();
+      await reloadUsers();
+    } catch (e: any) {
+      setError(e?.response?.data?.message || "Failed to save user.");
+    }
+  };
+
+  const startEdit = (id: string) => {
+    const u = users.find((x) => x.id === id);
+    if (!u) return;
+    setEditingId(id);
+    setForm({ name: u.name, email: u.email, password: "", role: u.role });
+    setError("");
+  };
+
+  const removeUser = async (id: string) => {
+    setError("");
+    try {
+      await deleteTelecallingUser(id);
+      await reloadUsers();
+    } catch (e: any) {
+      setError(e?.response?.data?.message || "Failed to delete user.");
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -1342,7 +1436,30 @@ function AdminDashboard() {
 
       {/* User management */}
       <div className="rounded-xl bg-card p-5 shadow-card">
-        <h3 className="mb-4 text-sm font-semibold text-card-foreground flex items-center gap-2"><Settings className="h-4 w-4" /> User Management</h3>
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-card-foreground flex items-center gap-2"><Settings className="h-4 w-4" /> User Management</h3>
+          <Button size="sm" variant="outline" onClick={() => void reloadUsers()} disabled={loadingUsers}>
+            {loadingUsers ? "Refreshing..." : "Refresh"}
+          </Button>
+        </div>
+
+        <div className="grid gap-2 md:grid-cols-4 mb-4">
+          <Input placeholder="Name" value={form.name} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} />
+          <Input placeholder="Email" value={form.email} onChange={(e) => setForm((s) => ({ ...s, email: e.target.value }))} />
+          <Input placeholder={editingId ? "New Password (optional)" : "Password"} type="password" value={form.password} onChange={(e) => setForm((s) => ({ ...s, password: e.target.value }))} />
+          <Select value={form.role} onValueChange={(v) => setForm((s) => ({ ...s, role: v as UserRole }))}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {roles.map((r) => <SelectItem key={r} value={r}>{roleLabels[r]}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="mb-4 flex items-center gap-2">
+          <Button size="sm" onClick={() => void submitUser()}>{editingId ? "Update User" : "Add User"}</Button>
+          {editingId && <Button size="sm" variant="outline" onClick={resetForm}>Cancel Edit</Button>}
+        </div>
+        {error && <p className="text-xs text-destructive mb-2">{error}</p>}
+
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -1350,6 +1467,7 @@ function AdminDashboard() {
                 <th className="pb-2 font-medium">Name</th>
                 <th className="pb-2 font-medium">Email</th>
                 <th className="pb-2 font-medium">Role</th>
+                <th className="pb-2 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1358,6 +1476,10 @@ function AdminDashboard() {
                   <td className="py-2.5 font-medium text-card-foreground">{u.name}</td>
                   <td className="py-2.5 text-muted-foreground">{u.email}</td>
                   <td className="py-2.5"><Badge variant="outline" className="text-[10px]">{roleLabels[u.role]}</Badge></td>
+                  <td className="py-2.5 text-right space-x-2">
+                    <Button size="sm" variant="outline" onClick={() => startEdit(u.id)}>Edit</Button>
+                    <Button size="sm" variant="destructive" onClick={() => void removeUser(u.id)}>Delete</Button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1386,6 +1508,12 @@ function AdminDashboard() {
    ═══════════════════════════════════════════════════════════════ */
 export default function RoleDashboard() {
   const { currentUser } = useAuth();
+
+  useEffect(() => {
+    if (currentUser?.role === "owner") {
+      void syncOwnerDashboardFromBackend().catch(() => { /* keep existing local data if sync fails */ });
+    }
+  }, [currentUser?.role]);
 
   if (!currentUser) {
     return (

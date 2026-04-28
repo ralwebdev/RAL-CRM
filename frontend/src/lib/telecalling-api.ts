@@ -115,3 +115,17 @@ export async function fetchTelecallingUsers(): Promise<User[]> {
   const items = Array.isArray(response.data) ? response.data : [];
   return items.map(mapUserFromApi);
 }
+
+export async function createTelecallingUser(payload: { name: string; email: string; password: string; role: User["role"] }): Promise<User> {
+  const response = await api.post("/api/users", sanitizeObject(payload));
+  return mapUserFromApi(response.data);
+}
+
+export async function updateTelecallingUser(id: string, payload: { name?: string; email?: string; password?: string; role?: User["role"] }): Promise<User> {
+  const response = await api.put(`/api/users/${id}`, sanitizeObject(payload));
+  return mapUserFromApi(response.data);
+}
+
+export async function deleteTelecallingUser(id: string): Promise<void> {
+  await api.delete(`/api/users/${id}`);
+}

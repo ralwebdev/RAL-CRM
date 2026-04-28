@@ -71,6 +71,7 @@ const STORAGE_KEYS = {
   schoolAccounts: "crm_school_accounts",
   schoolPrograms: "crm_school_programs",
   schoolStudents: "crm_school_students",
+  users: "crm_users",
 } as const;
 
 function getOrInit<T>(key: string, defaults: T[]): T[] {
@@ -122,7 +123,8 @@ export const store = {
   getSchoolStudents: () => getOrInit(STORAGE_KEYS.schoolStudents, mockSchoolStudents),
   saveSchoolStudents: (d: SchoolStudent[]) => save(STORAGE_KEYS.schoolStudents, d),
 
-  getUsers: () => mockUsers,
+  getUsers: () => getOrInit(STORAGE_KEYS.users, mockUsers),
+  saveUsers: (d: User[]) => save(STORAGE_KEYS.users, d),
 
   resetAll: () => {
     Object.values(STORAGE_KEYS).forEach((k) => db.deleteSync(k));
