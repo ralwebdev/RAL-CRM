@@ -9,6 +9,8 @@ import {
   fetchTelecallingFollowUps,
   fetchTelecallingUsers,
 } from "./telecalling-api";
+import { syncAllianceStoreFromBackend } from "./alliance-api";
+import type { UserRole } from "./types";
 
 let inFlight: Promise<void> | null = null;
 
@@ -59,5 +61,26 @@ export async function syncMarketingDashboardFromBackend(): Promise<void> {
     await inFlight;
   } finally {
     inFlight = null;
+  }
+}
+
+export async function syncDashboardDataByRole(role?: UserRole): Promise<void> {
+  if (!role) return;
+
+  if (role === "alliance_manager" || role === "alliance_executive") {
+    await syncAllianceStoreFromBackend({ force: true });
+    return;
+  }
+
+  // CRM dashboards (telecaller/counselor/admin/owner/marketing/telecalling manager)
+  if (
+    role === "telecaller" ||
+    role === "counselor" ||
+    role === "admin" ||
+    role === "owner" ||
+    role === "marketing_manager" ||
+    role === "telecalling_manager"
+  ) {
+    await syncOwnerDashboardFromBackend();
   }
 }

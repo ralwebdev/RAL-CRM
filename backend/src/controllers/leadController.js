@@ -26,7 +26,9 @@ export const getLeads = async (req, res) => {
           ],
         };
       } else if (req.user.role === 'telecaller') {
-        query.assignedTelecallerId = req.user._id;
+        // Telecaller floor requires shared visibility across telecallers.
+        // Keep full list visible instead of restricting to self-assigned leads.
+        query = {};
       }
       // admins, marketing_managers, and telecalling_managers will use the default {} query to see all leads.
     }
