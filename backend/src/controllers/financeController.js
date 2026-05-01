@@ -161,6 +161,8 @@ export const createExpense = async (req, res) => {
       ...data,
       requestedBy: req.user._id,
       submittedBy: req.user.name,
+      submittedById: req.user._id,
+      submittedByRole: req.user.role,
     });
     const createdExpense = await expense.save();
     res.status(201).json(createdExpense);

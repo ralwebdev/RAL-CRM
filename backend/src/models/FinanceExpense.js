@@ -59,6 +59,13 @@ const FinanceExpenseSchema = new mongoose.Schema({
   submittedBy: {
     type: String, // String name for frontend
   },
+  submittedById: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  },
+  submittedByRole: {
+    type: String,
+  },
   approvedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -73,6 +80,10 @@ const FinanceExpenseSchema = new mongoose.Schema({
 FinanceExpenseSchema.virtual('id').get(function() {
   return this._id.toHexString();
 });
+
+FinanceExpenseSchema.index({ requestedBy: 1, createdAt: -1 });
+FinanceExpenseSchema.index({ approvedBy: 1, createdAt: -1 });
+FinanceExpenseSchema.index({ submittedById: 1, createdAt: -1 });
 
 FinanceExpenseSchema.set('toJSON', {
   virtuals: true,

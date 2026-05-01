@@ -10,7 +10,13 @@ const PaymentHistorySchema = new mongoose.Schema({
 });
 
 const AdmissionSchema = new mongoose.Schema({
-  leadId: { type: mongoose.Schema.Types.ObjectId, ref: 'Lead', required: [true, 'Lead ID is required'] },
+  leadId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Lead',
+    required: [true, 'Lead ID is required'],
+    unique: true,
+    index: true
+  },
   studentName: { type: String, required: [true, 'Student name is required'] },
   phone: { type: String, required: [true, 'Phone number is required'] },
   email: { type: String, required: [true, 'Email is required'] },

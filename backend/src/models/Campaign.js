@@ -68,6 +68,10 @@ const CampaignSchema = new mongoose.Schema({
   timestamps: true,
 });
 
+CampaignSchema.index({ platform: 1, approvalStatus: 1 });
+CampaignSchema.index({ campaignOwner: 1 });
+CampaignSchema.index({ marketingManager: 1 });
+
 const Campaign = mongoose.model('Campaign', CampaignSchema);
 
 export default Campaign;

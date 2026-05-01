@@ -115,6 +115,12 @@ const CollectionSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
+CollectionSchema.index({ studentId: 1, collectedAt: -1 });
+CollectionSchema.index({ collectedById: 1, collectedAt: -1 });
+CollectionSchema.index({ invoiceId: 1 });
+CollectionSchema.index({ "invoiceRequest.invoiceId": 1 });
+CollectionSchema.index({ emiId: 1 });
+
 CollectionSchema.virtual('id').get(function() {
   return this._id.toHexString();
 });

@@ -58,6 +58,13 @@ export const createCollection = async (req, res) => {
     };
 
     const collection = new Collection(collectionData);
+    collection.audit.push({
+      byId: req.user._id,
+      byName: req.user.name,
+      byRole: req.user.role,
+      action: 'Collection Created',
+      toStatus: collection.status || 'Collected',
+    });
     const createdCollection = await collection.save();
 
     // Optionally update Admission's payment history
@@ -108,6 +115,7 @@ export const verifyCollection = async (req, res) => {
     const collection = await Collection.findById(req.params.id);
 
     if (collection) {
+      const prevStatus = collection.status;
       const matches = Math.abs(verifiedAmount - collection.amount) < 0.5;
       collection.verifiedAmount = verifiedAmount;
       collection.verificationMode = verificationMode;
@@ -117,6 +125,15 @@ export const verifyCollection = async (req, res) => {
       collection.verificationRemarks = remarks;
       collection.mismatchAmount = matches ? 0 : collection.amount - verifiedAmount;
       collection.status = matches ? 'Verified' : 'Mismatch';
+      collection.audit.push({
+        byId: req.user._id,
+        byName: req.user.name,
+        byRole: req.user.role,
+        action: 'Collection Verified',
+        fromStatus: prevStatus,
+        toStatus: collection.status,
+        remarks,
+      });
       
       const updatedCollection = await collection.save();
       res.json(updatedCollection);

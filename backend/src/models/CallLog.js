@@ -11,7 +11,8 @@ const CallLogSchema = new mongoose.Schema({
   notInterestedReason: { type: String },
   callbackDate: { type: String },
   callbackTime: { type: String },
-  createdAt: { type: String, required: true },
+  // Kept for frontend compatibility; canonical write-time comes from timestamps.
+  createdAt: { type: Date, default: Date.now },
   conversationInsight: {
     careerGoal: String,
     budgetRange: String,
@@ -24,5 +25,8 @@ const CallLogSchema = new mongoose.Schema({
     biggestConcern: String,
   }
 }, { timestamps: true });
+
+CallLogSchema.index({ leadId: 1, createdAt: -1 });
+CallLogSchema.index({ telecallerId: 1, createdAt: -1 });
 
 export default mongoose.model('CallLog', CallLogSchema);

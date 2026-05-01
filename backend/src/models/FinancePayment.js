@@ -51,6 +51,10 @@ const FinancePaymentSchema = new mongoose.Schema({
   timestamps: true,
 });
 
+FinancePaymentSchema.index({ recordedBy: 1, createdAt: -1 });
+FinancePaymentSchema.index({ invoiceId: 1, paidOn: -1 });
+FinancePaymentSchema.index({ expenseId: 1, paidOn: -1 });
+
 FinancePaymentSchema.virtual('id').get(function() {
   return this._id.toHexString();
 });

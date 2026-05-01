@@ -54,6 +54,10 @@ const allianceApprovalSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
+allianceApprovalSchema.index({ submittedBy: 1, createdAt: -1 });
+allianceApprovalSchema.index({ currentApproverId: 1, status: 1 });
+allianceApprovalSchema.index({ currentApproverRole: 1, status: 1 });
+
 const allianceApprovalLogSchema = new mongoose.Schema({
   approvalId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -85,6 +89,9 @@ const allianceApprovalLogSchema = new mongoose.Schema({
     type: String,
   },
 }, { timestamps: true });
+
+allianceApprovalLogSchema.index({ approvalId: 1, createdAt: -1 });
+allianceApprovalLogSchema.index({ actedBy: 1, createdAt: -1 });
 
 export const AllianceApproval = mongoose.model('AllianceApproval', allianceApprovalSchema);
 export const AllianceApprovalLog = mongoose.model('AllianceApprovalLog', allianceApprovalLogSchema);

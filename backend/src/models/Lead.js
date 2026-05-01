@@ -163,6 +163,12 @@ const LeadSchema = new mongoose.Schema({
   timestamps: true,
 });
 
+LeadSchema.index({ campaignId: 1 });
+LeadSchema.index({ assignedTelecallerId: 1, status: 1 });
+LeadSchema.index({ assignedCounselorId: 1, status: 1 });
+LeadSchema.index({ phone: 1 });
+LeadSchema.index({ email: 1 });
+
 const Lead = mongoose.model('Lead', LeadSchema);
 
 export default Lead;
