@@ -2,11 +2,10 @@
  * Student Collection Control System — central store
  *
  * Workflow:
- *   1. Counselor logs a Collection (status: "Collected").
- *   2. Counselor submits to Admin (status: "Awaiting Verification").
- *   3. Admin verifies against cash/bank and Approves / Rejects / Marks Mismatch.
- *   4. Once Verified, the entry appears in the Accounts queue → "Ready For Invoice".
- *   5. Accounts generates a Tax Invoice → status flips to "Invoice Generated".
+ *   1. Counselor records payment → auto-routed to Admin (status: "Awaiting Verification").
+ *   2. Admin verifies against cash/bank and Approves / Rejects / Marks Mismatch.
+ *   3. Once Verified, the entry appears in the Accounts queue → "Ready For Invoice".
+ *   4. Accounts generates a Tax Invoice → status flips to "Invoice Generated".
  *
  * EMI late-fee engine: ₹50 / day overdue, accrued on read (no schedule mutation).
  */
@@ -82,7 +81,7 @@ export interface CollectionAttachment {
   id: string;
   kind: "payment_screenshot" | "deposit_slip" | "student_note";
   name: string;
-  /** base64 data URL — fine for the localStorage demo */
+  /** base64 data URL */
   dataUrl?: string;
   uploadedAt: string;
 }
@@ -142,7 +141,7 @@ export interface Collection {
   chequeNumber?: string;
   chequeDate?: string;
 
-  /** Optional file attachments (base64 in localStorage). */
+  /** Optional file attachments (base64). */
   attachments?: CollectionAttachment[];
 
   /** Invoice request workflow (PI/TI/none). */
@@ -182,6 +181,13 @@ const listeners = new Set<Listener>();
 
 const uid = (p: string) => `${p}_${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-4)}`;
 const objectIdRegex = /^[a-fA-F0-9]{24}$/;
+const toId = (value: any): string => {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value._id) return String(value._id);
+  if (typeof value === "object" && value.id) return String(value.id);
+  return "";
+};
 
 function load(): Collection[] {
   return db.readSync<Collection[]>(KEY, seed()) ?? seed();
@@ -257,94 +263,89 @@ async function persistCollectionToAdmissionHistory(c: Collection): Promise<void>
 }
 
 export async function hydrateCollectionsFromBackend(): Promise<void> {
-  const response = await api.get("/api/admissions");
-  const rows = Array.isArray(response.data) ? response.data : [];
-
-  const backendCollections: Collection[] = rows.flatMap((admission: any, idx: number) => {
-    const studentId = String(admission?._id || admission?.id || `adm_${idx}`);
-    const studentName = String(admission?.studentName || "Student");
-    const courseName = String(admission?.courseSelected || "Course");
-    const studentMobile = admission?.phone ? String(admission.phone) : undefined;
-    const branch = admission?.batch ? String(admission.batch) : undefined;
-
-    const history = Array.isArray(admission?.paymentHistory) ? admission.paymentHistory : [];
-    return history.map((entry: any, hIdx: number) => {
-      const entryId = String(entry?._id || `${studentId}_${hIdx}`);
-      const collectedAt = entry?.paymentDate ? new Date(entry.paymentDate).toISOString() : new Date().toISOString();
-      const amount = Number(entry?.amountPaid || 0);
-      const referenceNo = entry?.referenceNumber ? String(entry.referenceNumber).trim() : "";
-      const modeRaw = String(entry?.paymentMode || "").toLowerCase();
-      const mode: CollectionMode =
-        modeRaw.includes("upi") ? "upi" :
-        modeRaw.includes("bank") ? "bank_transfer" :
-        modeRaw.includes("cheque") ? "cheque" :
-        modeRaw.includes("card") ? "card" :
-        "cash";
-
-      const stableKeyRaw = referenceNo || `${studentId}|${collectedAt.slice(0, 10)}|${amount}|${hIdx}`;
-      const stableKey = stableKeyRaw.replace(/[^a-zA-Z0-9|_-]/g, "_");
-
-      return {
-        id: `api_col_${stableKey}`,
-        receiptRef: referenceNo || `RC-${new Date(collectedAt).getFullYear()}-${String(hIdx + 1).padStart(4, "0")}`,
-        studentId,
-        studentName,
-        studentMobile,
-        courseName,
-        branch,
-        amount,
-        mode,
-        reason: "admission_fee",
-        collectedAt,
-        collectedById: "backend",
-        collectedByName: "Backend Sync",
-        collectorRole: "admin",
-        status: "Collected",
-        txnId: referenceNo || undefined,
-        invoiceRequest: { type: "none", status: "none" },
-        audit: [],
-        createdAt: collectedAt,
-      } satisfies Collection;
-    });
-  });
-
-  if (backendCollections.length > 0) {
-    const existingById = new Map(state.map((c) => [c.id, c]));
-    const existingByReceipt = new Map(
-      state
-        .filter((c) => !!c.receiptRef)
-        .map((c) => [String(c.receiptRef).trim().toLowerCase(), c]),
-    );
-
-    backendCollections.forEach((incoming) => {
-      const receiptKey = String(incoming.receiptRef || "").trim().toLowerCase();
-      const matched = existingById.get(incoming.id) || (receiptKey ? existingByReceipt.get(receiptKey) : undefined);
-      if (!matched) {
-        existingById.set(incoming.id, incoming);
-        return;
-      }
-
-      // Preserve local workflow/progress and local-entered metadata.
-      // Backend refresh should not regress admin verification state.
-      const preserved: Collection = {
-        ...incoming,
-        ...matched,
-        id: matched.id,
-        // Refresh mutable source-of-truth student/payment fields from backend while
-        // keeping local workflow and admin metadata untouched.
-        studentName: incoming.studentName || matched.studentName,
-        studentMobile: incoming.studentMobile || matched.studentMobile,
-        courseName: incoming.courseName || matched.courseName,
-        branch: incoming.branch || matched.branch,
-        amount: incoming.amount || matched.amount,
-        mode: incoming.mode || matched.mode,
-        txnId: incoming.txnId || matched.txnId,
-      };
-      existingById.set(matched.id, preserved);
-    });
-
-    save(Array.from(existingById.values()));
-  }
+  const collectionsRes = await api.get("/api/collections");
+  const rows = Array.isArray(collectionsRes.data) ? collectionsRes.data : [];
+  const mapped: Collection[] = rows.map((raw: any) => ({
+      id: toId(raw),
+      receiptRef: String(raw?.receiptRef || ""),
+      studentId: toId(raw?.studentId),
+      studentName: String(raw?.studentName || raw?.studentId?.studentName || "Student"),
+      studentMobile: raw?.studentMobile ? String(raw.studentMobile) : undefined,
+      courseName: String(raw?.courseName || raw?.studentId?.courseSelected || "Course"),
+      branch: raw?.branch ? String(raw.branch) : undefined,
+      amount: Number(raw?.amount || 0),
+      mode: raw?.mode || "cash",
+      reason: raw?.reason || "admission_fee",
+      collectedAt: raw?.collectedAt ? new Date(raw.collectedAt).toISOString() : new Date().toISOString(),
+      collectedById: toId(raw?.collectedById),
+      collectedByName: String(raw?.collectedByName || raw?.collectedById?.name || "Unknown"),
+      collectorRole: raw?.collectorRole || "counselor",
+      remarks: raw?.remarks ? String(raw.remarks) : undefined,
+      txnId: raw?.txnId ? String(raw.txnId) : undefined,
+      bankName: raw?.bankName ? String(raw.bankName) : undefined,
+      chequeNumber: raw?.chequeNumber ? String(raw.chequeNumber) : undefined,
+      chequeDate: raw?.chequeDate ? new Date(raw.chequeDate).toISOString() : undefined,
+      attachments: Array.isArray(raw?.attachments) ? raw.attachments.map((a: any) => ({
+        id: toId(a) || uid("att"),
+        kind: a?.kind,
+        name: String(a?.name || "attachment"),
+        dataUrl: a?.dataUrl,
+        uploadedAt: a?.uploadedAt ? new Date(a.uploadedAt).toISOString() : new Date().toISOString(),
+      })) : [],
+      invoiceRequest: raw?.invoiceRequest ? {
+        type: raw.invoiceRequest.type || "none",
+        status: raw.invoiceRequest.status || "none",
+        requestedById: toId(raw.invoiceRequest.requestedById) || undefined,
+        requestedByName: raw.invoiceRequest.requestedByName || undefined,
+        requestedByRole: raw.invoiceRequest.requestedByRole || undefined,
+        requestedAt: raw.invoiceRequest.requestedAt ? new Date(raw.invoiceRequest.requestedAt).toISOString() : undefined,
+        adminReviewedById: toId(raw.invoiceRequest.adminReviewedById) || undefined,
+        adminReviewedByName: raw.invoiceRequest.adminReviewedByName || undefined,
+        adminReviewedAt: raw.invoiceRequest.adminReviewedAt ? new Date(raw.invoiceRequest.adminReviewedAt).toISOString() : undefined,
+        adminRemarks: raw.invoiceRequest.adminRemarks || undefined,
+        preparedById: toId(raw.invoiceRequest.preparedById) || undefined,
+        preparedByName: raw.invoiceRequest.preparedByName || undefined,
+        preparedAt: raw.invoiceRequest.preparedAt ? new Date(raw.invoiceRequest.preparedAt).toISOString() : undefined,
+        issuedById: toId(raw.invoiceRequest.issuedById) || undefined,
+        issuedByName: raw.invoiceRequest.issuedByName || undefined,
+        issuedAt: raw.invoiceRequest.issuedAt ? new Date(raw.invoiceRequest.issuedAt).toISOString() : undefined,
+        invoiceId: toId(raw.invoiceRequest.invoiceId) || undefined,
+        invoiceNo: raw.invoiceRequest.invoiceNo || undefined,
+        holdReason: raw.invoiceRequest.holdReason || undefined,
+        clarificationQuestion: raw.invoiceRequest.clarificationQuestion || undefined,
+        clarificationAnswer: raw.invoiceRequest.clarificationAnswer || undefined,
+        rejectionReason: raw.invoiceRequest.rejectionReason || undefined,
+      } : { type: "none", status: "none" },
+      emiId: toId(raw?.emiId) || undefined,
+      emiInstallmentNo: raw?.emiInstallmentNo ?? undefined,
+      lateFeeAmount: Number(raw?.lateFeeAmount || 0),
+      status: raw?.status || "Collected",
+      verifiedAmount: raw?.verifiedAmount ?? undefined,
+      verificationMode: raw?.verificationMode ?? undefined,
+      verifiedById: toId(raw?.verifiedById) || undefined,
+      verifiedByName: raw?.verifiedByName || undefined,
+      verifiedAt: raw?.verifiedAt ? new Date(raw.verifiedAt).toISOString() : undefined,
+      verificationRemarks: raw?.verificationRemarks || undefined,
+      mismatchAmount: raw?.mismatchAmount ?? undefined,
+      invoiceId: toId(raw?.invoiceId) || undefined,
+      invoiceNo: raw?.invoiceNo || undefined,
+      invoicedById: toId(raw?.invoicedById) || undefined,
+      invoicedByName: raw?.invoicedByName || undefined,
+      invoicedAt: raw?.invoicedAt ? new Date(raw.invoicedAt).toISOString() : undefined,
+      audit: Array.isArray(raw?.audit) ? raw.audit.map((a: any) => ({
+        id: toId(a) || uid("aud"),
+        at: a?.at ? new Date(a.at).toISOString() : new Date().toISOString(),
+        byId: toId(a?.byId),
+        byName: String(a?.byName || "Unknown"),
+        byRole: String(a?.byRole || "unknown"),
+        action: String(a?.action || "update"),
+        fromStatus: a?.fromStatus,
+        toStatus: a?.toStatus,
+        remarks: a?.remarks,
+      })) : [],
+      createdAt: raw?.createdAt ? new Date(raw.createdAt).toISOString() : new Date().toISOString(),
+    }));
+  save(mapped);
 }
 
 function pushAudit(c: Collection, entry: Omit<CollectionAuditEntry, "id" | "at">) {
@@ -352,6 +353,15 @@ function pushAudit(c: Collection, entry: Omit<CollectionAuditEntry, "id" | "at">
     { id: uid("aud"), at: new Date().toISOString(), ...entry },
     ...c.audit,
   ];
+}
+
+async function syncCollectionUpdateToBackend(id: string, patch: Record<string, unknown>) {
+  if (!objectIdRegex.test(id)) return;
+  try {
+    await api.put(`/api/collections/${id}`, patch);
+  } catch {
+    // best-effort sync; local workflow continues
+  }
 }
 
 /* ───────── Counselor / Admin: log collection ───────── */
@@ -384,6 +394,7 @@ export function logCollection(
   by: { id: string; name: string; role: string },
 ): Collection {
   const collectorRole: CollectorRole = by.role === "admin" ? "admin" : "counselor";
+  const initialStatus: CollectionStatus = collectorRole === "admin" ? "Collected" : "Awaiting Verification";
   const reqType: InvoiceRequestType = input.requestInvoiceType ?? "none";
   const invoiceRequest: InvoiceRequest | undefined = reqType === "none"
     ? { type: "none", status: "none" }
@@ -399,23 +410,24 @@ export function logCollection(
 
   const { requestInvoiceType, ...rest } = input;
   void requestInvoiceType;
+  const txnSuffix = String(Math.floor(1000 + Math.random() * 9000));
   const c: Collection = {
     id: uid("col"),
-    receiptRef: `RC-${new Date().getFullYear()}-${String(state.length + 1).padStart(4, "0")}`,
+    receiptRef: `RC-${new Date().getFullYear()}-${txnSuffix}`,
     ...rest,
     collectedAt: new Date().toISOString(),
     collectedById: by.id,
     collectedByName: by.name,
     collectorRole,
-    status: "Collected",
+    status: initialStatus,
     invoiceRequest,
     audit: [],
     createdAt: new Date().toISOString(),
   };
   pushAudit(c, {
     byId: by.id, byName: by.name, byRole: by.role,
-    action: collectorRole === "admin" ? "Direct collection logged (admin)" : "Collection logged",
-    toStatus: "Collected",
+    action: collectorRole === "admin" ? "Direct collection logged (admin)" : "Collection logged and sent for admin verification",
+    toStatus: initialStatus,
     remarks: input.remarks,
   });
   if (invoiceRequest && invoiceRequest.type !== "none") {
@@ -427,6 +439,69 @@ export function logCollection(
   }
   save([c, ...state]);
   void persistCollectionToAdmissionHistory(c);
+  void (async () => {
+    let backendStudentId = c.studentId;
+    try {
+      if (objectIdRegex.test(backendStudentId)) {
+        // If this is already an Admission id, this succeeds. If it's a Lead id, it 404s and we fallback.
+        await api.get(`/api/admissions/${backendStudentId}`);
+      } else {
+        backendStudentId = "";
+      }
+    } catch {
+      backendStudentId = "";
+    }
+
+    if (!objectIdRegex.test(backendStudentId)) {
+      try {
+        const admissionsRes = await api.get("/api/admissions");
+        const admissions = Array.isArray(admissionsRes.data) ? admissionsRes.data : [];
+        const matched = admissions.find((a: any) =>
+          toId(a) === c.studentId ||
+          toId(a?.leadId) === c.studentId ||
+          String(a?.studentName || "").trim().toLowerCase() === c.studentName.trim().toLowerCase(),
+        );
+        if (matched) backendStudentId = toId(matched);
+      } catch {
+        // ignore resolution failure
+      }
+    }
+
+    // If we still don't have an Admission ObjectId, send original studentId too.
+    // Backend will attempt global resolution by leadId / student name.
+    const postStudentId = objectIdRegex.test(backendStudentId) ? backendStudentId : c.studentId;
+    if (!postStudentId) return;
+
+    void api.post("/api/collections", {
+      studentId: postStudentId,
+      studentName: c.studentName,
+      studentMobile: c.studentMobile,
+      courseName: c.courseName,
+      branch: c.branch,
+      amount: c.amount,
+      mode: c.mode,
+      reason: c.reason,
+      remarks: c.remarks,
+      txnId: c.txnId,
+      bankName: c.bankName,
+      chequeNumber: c.chequeNumber,
+      chequeDate: c.chequeDate,
+      invoiceRequest: c.invoiceRequest,
+      status: c.status,
+      receiptRef: c.receiptRef,
+    }).then((res) => {
+      const savedId = String(res?.data?._id || res?.data?.id || "");
+      if (!savedId) return;
+      const idx = state.findIndex((x) => x.id === c.id);
+      if (idx >= 0) {
+        const resolvedId = toId(res?.data?.studentId) || backendStudentId || c.studentId;
+        state[idx] = { ...state[idx], id: savedId, studentId: resolvedId };
+        save([...state]);
+      }
+    }).catch(() => {
+      // keep local UX non-blocking; admin view depends on backend row
+    });
+  })();
   return c;
 }
 
@@ -443,6 +518,7 @@ export function submitToAdmin(id: string, by: { id: string; name: string; role: 
     remarks,
   });
   save([...state]);
+  void syncCollectionUpdateToBackend(c.id, { status: c.status, audit: c.audit });
   return c;
 }
 
@@ -479,6 +555,14 @@ export function verifyCollection(
     remarks: input.remarks,
   });
   save([...state]);
+  void syncCollectionUpdateToBackend(c.id, {
+    status: c.status,
+    verifiedById: c.verifiedById,
+    verifiedByName: c.verifiedByName,
+    verifiedAt: c.verifiedAt,
+    verificationRemarks: c.verificationRemarks,
+    audit: c.audit,
+  });
   return c;
 }
 
@@ -502,6 +586,11 @@ export function rejectCollection(
     remarks,
   });
   save([...state]);
+  void syncCollectionUpdateToBackend(c.id, {
+    status: c.status,
+    invoiceRequest: c.invoiceRequest,
+    audit: c.audit,
+  });
   return c;
 }
 
@@ -519,6 +608,11 @@ export function markReadyForInvoice(
     fromStatus: prev, toStatus: c.status,
   });
   save([...state]);
+  void syncCollectionUpdateToBackend(c.id, {
+    status: c.status,
+    invoiceRequest: c.invoiceRequest,
+    audit: c.audit,
+  });
   return c;
 }
 
@@ -545,6 +639,11 @@ export function linkTiToCollection(
     fromStatus: prev, toStatus: c.status,
   });
   save([...state]);
+  void syncCollectionUpdateToBackend(c.id, {
+    status: c.status,
+    invoiceRequest: c.invoiceRequest,
+    audit: c.audit,
+  });
   return c;
 }
 
@@ -637,6 +736,10 @@ export function requestInvoice(
     remarks: `Status: ${req.status.replace(/_/g, " ")}`,
   });
   save([...state]);
+  void syncCollectionUpdateToBackend(c.id, {
+    invoiceRequest: c.invoiceRequest,
+    audit: c.audit,
+  });
   return c;
 }
 
@@ -657,6 +760,10 @@ export function adminApproveInvoiceRequest(id: string, by: ActorContext, remarks
     remarks,
   });
   save([...state]);
+  void syncCollectionUpdateToBackend(c.id, {
+    invoiceRequest: c.invoiceRequest,
+    audit: c.audit,
+  });
   return c;
 }
 
@@ -675,6 +782,11 @@ export function adminRejectInvoiceRequest(id: string, reason: string, by: ActorC
     remarks: reason,
   });
   save([...state]);
+  void syncCollectionUpdateToBackend(c.id, {
+    status: c.status,
+    invoiceRequest: c.invoiceRequest,
+    audit: c.audit,
+  });
   return c;
 }
 
@@ -693,6 +805,10 @@ export function accountsPrepareDraft(id: string, by: ActorContext): Collection |
     action: "Accounts prepared draft",
   });
   save([...state]);
+  void syncCollectionUpdateToBackend(c.id, {
+    invoiceRequest: c.invoiceRequest,
+    audit: c.audit,
+  });
   return c;
 }
 
@@ -726,6 +842,16 @@ export function accountsIssueInvoice(
     action: `Invoice issued (${req.type} ${invoiceNo})`,
   });
   save([...state]);
+  void syncCollectionUpdateToBackend(c.id, {
+    invoiceRequest: c.invoiceRequest,
+    invoiceId: c.invoiceId,
+    invoiceNo: c.invoiceNo,
+    invoicedById: c.invoicedById,
+    invoicedByName: c.invoicedByName,
+    invoicedAt: c.invoicedAt,
+    status: c.status,
+    audit: c.audit,
+  });
   return c;
 }
 
@@ -740,6 +866,10 @@ export function accountsHoldRequest(id: string, reason: string, by: ActorContext
     remarks: reason,
   });
   save([...state]);
+  void syncCollectionUpdateToBackend(c.id, {
+    invoiceRequest: c.invoiceRequest,
+    audit: c.audit,
+  });
   return c;
 }
 
@@ -754,6 +884,10 @@ export function accountsRequestClarification(id: string, question: string, by: A
     remarks: question,
   });
   save([...state]);
+  void syncCollectionUpdateToBackend(c.id, {
+    invoiceRequest: c.invoiceRequest,
+    audit: c.audit,
+  });
   return c;
 }
 
@@ -768,6 +902,11 @@ export function accountsRejectRequest(id: string, reason: string, by: ActorConte
     remarks: reason,
   });
   save([...state]);
+  void syncCollectionUpdateToBackend(c.id, {
+    invoiceRequest: c.invoiceRequest,
+    status: c.status,
+    audit: c.audit,
+  });
   return c;
 }
 
@@ -784,6 +923,10 @@ export function answerClarification(id: string, answer: string, by: ActorContext
     remarks: answer,
   });
   save([...state]);
+  void syncCollectionUpdateToBackend(c.id, {
+    invoiceRequest: c.invoiceRequest,
+    audit: c.audit,
+  });
   return c;
 }
 

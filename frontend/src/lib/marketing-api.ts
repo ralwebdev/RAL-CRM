@@ -101,7 +101,8 @@ const mapLeadFromApi = (raw: UnknownRecord): Lead => {
     id: toId(raw),
     campaignId: toId(raw.campaignId),
     assignedTelecallerId: toId(raw.assignedTelecallerId),
-    assignedCounselor: toId(raw.assignedCounselor),
+    assignedCounselor: toId(raw.assignedCounselorId || raw.assignedCounselor),
+    assignedCounselorId: toId(raw.assignedCounselorId || raw.assignedCounselor),
     leadOwner: toId(raw.leadOwner),
     walkInCounselor: toId(raw.walkInCounselor),
     createdAt: toDateOnly(raw.createdAt),
@@ -195,7 +196,9 @@ const leadPayload = (lead: Partial<Lead>) => {
     ...lead,
     campaignId: isObjectId(lead.campaignId) ? lead.campaignId : undefined,
     assignedTelecallerId: isObjectId(lead.assignedTelecallerId) ? lead.assignedTelecallerId : undefined,
-    assignedCounselor: isObjectId(lead.assignedCounselor) ? lead.assignedCounselor : undefined,
+    assignedCounselorId: isObjectId((lead as any).assignedCounselorId)
+      ? (lead as any).assignedCounselorId
+      : (isObjectId(lead.assignedCounselor) ? lead.assignedCounselor : undefined),
     leadOwner: isObjectId(lead.leadOwner) ? lead.leadOwner : undefined,
     walkInCounselor: isObjectId(lead.walkInCounselor) ? lead.walkInCounselor : undefined,
     activities,

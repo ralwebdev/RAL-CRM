@@ -18,7 +18,7 @@ router.route('/')
 
 router.route('/:id')
   .get(getCollectionById)
-  .put(authorize('admin', 'owner', 'counselor'), updateCollection);
+  .put(authorize('admin', 'owner', 'counselor', 'accounts_manager', 'accounts_executive'), updateCollection);
 
 router.route('/:id/verify')
   .put(authorize('admin', 'accounts_manager', 'accounts_executive', 'owner'), verifyCollection);

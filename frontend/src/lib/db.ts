@@ -1,33 +1,10 @@
-import { SESSION_STORAGE_KEYS } from "./session";
-import { TOKEN_STORAGE_KEY } from "./session";
-
 type Updater<T> = (current: T | undefined) => T;
 
 interface ClearOptions {
   preserveKeys?: string[];
 }
 
-const getStorage = (): Storage | null => {
-  if (typeof window === "undefined") return null;
-  return window.localStorage;
-};
-
 const memoryStore = new Map<string, string>();
-const canPersist = (key: string) => false; // Disabled localStorage for data stores
-
-// Clean up old mock data from user's browser on app load
-if (typeof window !== "undefined") {
-  try {
-    const keysToRemove: string[] = [];
-    for (let i = 0; i < window.localStorage.length; i++) {
-      const k = window.localStorage.key(i);
-      if (k && k !== "crm_auth_token" && k !== "theme") {
-        keysToRemove.push(k);
-      }
-    }
-    keysToRemove.forEach(k => window.localStorage.removeItem(k));
-  } catch (e) {}
-}
 
 const parseJSON = <T>(raw: string | null): T | undefined => {
   if (!raw) return undefined;
@@ -36,17 +13,6 @@ const parseJSON = <T>(raw: string | null): T | undefined => {
   } catch {
     return undefined;
   }
-};
-
-const preserveAndClear = (storage: Storage, keysToPreserve: string[]) => {
-  const snapshot = new Map<string, string>();
-  keysToPreserve.forEach((key) => {
-    const value = storage.getItem(key);
-    if (value !== null) snapshot.set(key, value);
-  });
-
-  storage.clear();
-  snapshot.forEach((value, key) => storage.setItem(key, value));
 };
 
 export const db = {

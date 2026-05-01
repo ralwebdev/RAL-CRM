@@ -382,7 +382,10 @@ export function LogCollectionDialog({
             </Button>
           </div>
           <p className="text-[10px] text-muted-foreground text-center">
-            Status will be <Badge variant="outline" className="text-[10px] px-1 py-0">Collected</Badge>
+            Status will be{" "}
+            <Badge variant="outline" className="text-[10px] px-1 py-0">
+              {asAdmin ? "Collected" : "Awaiting Verification"}
+            </Badge>
             {requestType !== "none" && (
               <> · Invoice request → <Badge variant="outline" className="text-[10px] px-1 py-0">{asAdmin ? "Awaiting Accounts" : "Awaiting Admin"}</Badge></>
             )}

@@ -111,6 +111,13 @@ export default function CounselingPage() {
   const totalRevenue = myAdmissions.reduce((s, a) => s + (a.totalFee || 0), 0);
 
   const myFollowUps = followUps.filter((f) => f.assignedTo === counselorId && !f.completed && f.date <= today);
+  const admissionIdByLeadId = useMemo(() => {
+    const m = new Map<string, string>();
+    admissions.forEach((a) => {
+      if (a.leadId && a.id) m.set(a.leadId, a.id);
+    });
+    return m;
+  }, [admissions]);
 
   // Walk-in conversion rate
   const walkInAdmissions = myAdmissions.filter((a) => {
@@ -201,7 +208,11 @@ export default function CounselingPage() {
         <CollectionsWidget
           counselorId={counselorId}
           studentNames={myLeads.map(l => l.name)}
-          students={myLeads.map(l => ({ id: l.id, name: l.name, course: l.interestedCourse || "—" }))}
+          students={myLeads.map(l => ({
+            id: admissionIdByLeadId.get(l.id) || l.id,
+            name: l.name,
+            course: l.interestedCourse || "—",
+          }))}
         />
       </div>
 

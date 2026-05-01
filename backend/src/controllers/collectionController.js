@@ -1,5 +1,36 @@
 import Collection from '../models/Collection.js';
 import Admission from '../models/Admission.js';
+import mongoose from 'mongoose';
+
+const RECEIPT_REF_REGEX = /^RC-(\d{4})-(\d{4})$/i;
+
+const makeReceiptRef = (dateLike = new Date()) => {
+  const d = new Date(dateLike || Date.now());
+  const year = Number.isNaN(d.getTime()) ? new Date().getFullYear() : d.getFullYear();
+  const suffix = String(Math.floor(1000 + Math.random() * 9000));
+  return `RC-${year}-${suffix}`;
+};
+
+const normalizeReceiptRef = (rawValue, dateLike) => {
+  const raw = String(rawValue || '').trim().toUpperCase();
+  const match = raw.match(RECEIPT_REF_REGEX);
+  if (match) return `RC-${match[1]}-${match[2]}`;
+  return makeReceiptRef(dateLike);
+};
+
+const resolveUniqueReceiptRef = async (rawValue, dateLike) => {
+  let candidate = normalizeReceiptRef(rawValue, dateLike);
+  const existsExact = await Collection.exists({ receiptRef: candidate });
+  if (!existsExact) return candidate;
+
+  for (let i = 0; i < 30; i += 1) {
+    candidate = makeReceiptRef(dateLike);
+    // eslint-disable-next-line no-await-in-loop
+    const exists = await Collection.exists({ receiptRef: candidate });
+    if (!exists) return candidate;
+  }
+  return `RC-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`;
+};
 
 // @desc    Get all collections
 // @route   GET /api/collections
@@ -44,17 +75,40 @@ export const getCollectionById = async (req, res) => {
 // @access  Private
 export const createCollection = async (req, res) => {
   try {
-    // Validate foreign key: studentId (Admission)
-    const admissionExists = await Admission.findById(req.body.studentId);
-    if (!admissionExists) {
-      return res.status(400).json({ message: 'Invalid studentId: Admission does not exist.' });
+    // Resolve and validate foreign key: studentId (Admission).
+    // Frontend may pass either Admission._id or Lead._id; both should map safely.
+    const studentIdRaw = req.body.studentId;
+    const studentIdIsObjectId = mongoose.isValidObjectId(studentIdRaw);
+
+    let resolvedAdmission = null;
+    if (studentIdIsObjectId) {
+      resolvedAdmission = await Admission.findById(studentIdRaw);
     }
+    if (!resolvedAdmission && studentIdIsObjectId) {
+      resolvedAdmission = await Admission.findOne({ leadId: studentIdRaw });
+    }
+    if (!resolvedAdmission && req.body.studentName) {
+      resolvedAdmission = await Admission.findOne({
+        studentName: req.body.studentName,
+        ...(req.body.studentMobile ? { phone: req.body.studentMobile } : {}),
+      });
+    }
+    const fallbackStudentId = studentIdIsObjectId
+      ? studentIdRaw
+      : new mongoose.Types.ObjectId();
+    const finalStudentId = resolvedAdmission?._id || fallbackStudentId;
+    const finalReceiptRef = await resolveUniqueReceiptRef(req.body?.receiptRef, req.body?.collectedAt);
+
+    const statusFromRole = req.user.role === 'admin' ? (req.body?.status || 'Collected') : 'Awaiting Verification';
 
     const collectionData = {
       ...req.body,
+      receiptRef: finalReceiptRef,
+      studentId: finalStudentId,
       collectedById: req.user._id,
       collectedByName: req.user.name,
-      collectorRole: req.user.role === 'admin' ? 'admin' : 'counselor'
+      collectorRole: req.user.role === 'admin' ? 'admin' : 'counselor',
+      status: statusFromRole,
     };
 
     const collection = new Collection(collectionData);
@@ -62,7 +116,7 @@ export const createCollection = async (req, res) => {
       byId: req.user._id,
       byName: req.user.name,
       byRole: req.user.role,
-      action: 'Collection Created',
+      action: resolvedAdmission ? 'Collection Created' : 'Collection Created (unmapped student)',
       toStatus: collection.status || 'Collected',
     });
     const createdCollection = await collection.save();

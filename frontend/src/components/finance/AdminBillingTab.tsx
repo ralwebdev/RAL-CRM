@@ -122,19 +122,26 @@ export function AdminBillingTab() {
   };
 
   // ── Buckets ──
+  const isMyAdminCollection = (c: Collection) =>
+    c.collectorRole === "admin";
+
+  const isPendingVerificationCandidate = (c: Collection) =>
+    c.status === "Collected" ||
+    c.status === "Awaiting Verification" ||
+    c.status === "Mismatch" ||
+    c.invoiceRequest?.status === "awaiting_admin_review";
+
   const pendingVerification = items.filter(c =>
-    c.collectorRole === "counselor" && (
-      c.status === "Collected" ||
-      c.status === "Awaiting Verification" ||
-      c.status === "Mismatch" ||
-      c.invoiceRequest?.status === "awaiting_admin_review"
-    ),
+    c.collectorRole === "counselor" && isPendingVerificationCandidate(c),
   );
-  const myCollections = items.filter(c => c.collectorRole === "admin");
+  const myCollections = items.filter(c => isMyAdminCollection(c));
   const verifiedToAccounts = items.filter(c =>
-    c.invoiceRequest && [
+    c.status === "Verified" ||
+    c.status === "Ready For Invoice" ||
+    c.status === "Invoice Generated" ||
+    !!(c.invoiceRequest && [
       "awaiting_accounts", "draft_prepared", "issued",
-    ].includes(c.invoiceRequest.status),
+    ].includes(c.invoiceRequest.status)),
   );
   const holdRejected = items.filter(c =>
     c.status === "Rejected" ||

@@ -135,7 +135,9 @@ export function CounselorDashboard() {
   const followUps = store.getFollowUps();
   const today = new Date().toISOString().split("T")[0];
 
-  const myLeads = leads.filter((l) => l.assignedCounselor === currentUser?.id);
+  const myLeads = leads.filter(
+    (l) => l.assignedCounselor === currentUser?.id || l.walkInCounselor === currentUser?.id
+  );
   const pendingCounseling = myLeads.filter((l) => l.status === "Counseling");
   const hotLeads = leads.filter((l) => l.intentCategory === "High Intent" && l.qualification?.budgetConfirmed && l.status !== "Admission" && l.status !== "Lost");
   const admissionsToday = admissions.filter((a) => a.admissionDate === today);

@@ -1,6 +1,6 @@
 /**
  * Counselor Collections widget — top-row card for /counseling.
- * Surfaces today's collections + queue of items needing submission to admin,
+ * Surfaces today's collections + queue of items sent to admin verification,
  * EMI students with overdue late fees, and verified-collections count.
  */
 import { useMemo, useState, useSyncExternalStore } from "react";
@@ -8,11 +8,9 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { IndianRupee, Send, Clock, CheckCircle2, AlertTriangle, Plus } from "lucide-react";
-import { toast } from "sonner";
-import { useAuth } from "@/lib/auth-context";
+import { IndianRupee, Clock, CheckCircle2, AlertTriangle, Plus } from "lucide-react";
 import {
-  getCollections, subscribeCollections, submitToAdmin, computeEmiLateFee,
+  getCollections, subscribeCollections, computeEmiLateFee,
   getCollectionsByCounselor, type Collection,
 } from "@/lib/collection-store";
 import { getFinance, subscribeFinance } from "@/lib/finance-store";
@@ -35,7 +33,6 @@ function useFin() {
 export function CollectionsWidget({ counselorId, students }: Props) {
   useCol();
   const fin = useFin();
-  const { currentUser } = useAuth();
   const [open, setOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
 
@@ -62,13 +59,6 @@ export function CollectionsWidget({ counselorId, students }: Props) {
 
   const lateFeeCollectible = overdueEmis.reduce((s, x) => s + x.lateFee, 0);
 
-  const submitAll = () => {
-    pendingSubmission.forEach(c => submitToAdmin(c.id, {
-      id: currentUser?.id || "u0", name: currentUser?.name || "Counselor", role: currentUser?.role || "counselor",
-    }));
-    toast.success(`${pendingSubmission.length} collection${pendingSubmission.length === 1 ? "" : "s"} submitted to admin`);
-  };
-
   return (
     <>
       <button
@@ -87,11 +77,11 @@ export function CollectionsWidget({ counselorId, students }: Props) {
               ₹{todayCollected.toLocaleString("en-IN")}
             </p>
             <p className="text-[11px] text-muted-foreground mt-0.5">
-              {pendingSubmission.length > 0
-                ? <span className="text-warning">{pendingSubmission.length} pending submission · </span>
-                : null}
               {awaitingVerification.length > 0
-                ? <span>{awaitingVerification.length} awaiting verify · </span>
+                ? <span>{awaitingVerification.length} sent for admin verification · </span>
+                : null}
+              {pendingSubmission.length > 0
+                ? <span className="text-warning">{pendingSubmission.length} legacy pending · </span>
                 : null}
               {verified.length > 0 ? <span className="text-success">{verified.length} verified</span> : <span>tap to log</span>}
             </p>
@@ -101,7 +91,7 @@ export function CollectionsWidget({ counselorId, students }: Props) {
               </p>
             )}
           </div>
-          {pendingSubmission.length > 0 && <AlertTriangle className="h-4 w-4 text-warning shrink-0" />}
+            {(pendingSubmission.length > 0 || awaitingVerification.length > 0) && <AlertTriangle className="h-4 w-4 text-warning shrink-0" />}
         </div>
       </button>
 
@@ -117,16 +107,11 @@ export function CollectionsWidget({ counselorId, students }: Props) {
             <Button size="sm" onClick={() => { setOpen(false); setLogOpen(true); }} className="flex-1">
               <Plus className="h-3.5 w-3.5 mr-1" /> Log Collection
             </Button>
-            {pendingSubmission.length > 0 && (
-              <Button size="sm" variant="outline" onClick={submitAll}>
-                <Send className="h-3.5 w-3.5 mr-1" /> Submit {pendingSubmission.length}
-              </Button>
-            )}
           </div>
 
-          <Tabs defaultValue="pending" className="mt-3">
+          <Tabs defaultValue="awaiting" className="mt-3">
             <TabsList className="grid grid-cols-4 h-8">
-              <TabsTrigger value="pending" className="text-xs">Pending ({pendingSubmission.length})</TabsTrigger>
+              <TabsTrigger value="pending" className="text-xs">Legacy ({pendingSubmission.length})</TabsTrigger>
               <TabsTrigger value="awaiting" className="text-xs">Awaiting ({awaitingVerification.length})</TabsTrigger>
               <TabsTrigger value="verified" className="text-xs">Verified ({verified.length})</TabsTrigger>
               <TabsTrigger value="emi" className="text-xs">EMI ({overdueEmis.length})</TabsTrigger>
@@ -134,7 +119,7 @@ export function CollectionsWidget({ counselorId, students }: Props) {
 
             <TabsContent value="pending" className="mt-2 space-y-2">
               {pendingSubmission.length === 0
-                ? <EmptyState message="Nothing waiting on you." />
+                ? <EmptyState message="No legacy entries waiting for manual submit." />
                 : pendingSubmission.map(c => <CollectionRow key={c.id} c={c} />)}
             </TabsContent>
             <TabsContent value="awaiting" className="mt-2 space-y-2">
@@ -178,13 +163,6 @@ export function CollectionsWidget({ counselorId, students }: Props) {
 }
 
 function CollectionRow({ c }: { c: Collection }) {
-  const { currentUser } = useAuth();
-  const submit = () => {
-    submitToAdmin(c.id, {
-      id: currentUser?.id || "u0", name: currentUser?.name || "Counselor", role: currentUser?.role || "counselor",
-    });
-    toast.success(`${c.receiptRef} submitted to admin`);
-  };
   const tone =
     c.status === "Collected" ? "bg-warning/10 text-warning border-warning/30" :
     c.status === "Awaiting Verification" ? "bg-primary/10 text-primary border-primary/30" :
@@ -208,11 +186,6 @@ function CollectionRow({ c }: { c: Collection }) {
             {c.lateFeeAmount ? <span className="text-warning"> (incl. ₹{c.lateFeeAmount} late fee)</span> : null}
           </p>
         </div>
-        {c.status === "Collected" && (
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={submit}>
-            <Send className="h-3 w-3 mr-1" /> Submit
-          </Button>
-        )}
         {c.status === "Verified" || c.status === "Ready For Invoice" ? <CheckCircle2 className="h-4 w-4 text-success shrink-0 mt-1" /> : null}
         {c.status === "Awaiting Verification" ? <Clock className="h-4 w-4 text-primary shrink-0 mt-1" /> : null}
       </div>
