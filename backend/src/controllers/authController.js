@@ -12,7 +12,13 @@ const generateToken = (id) => {
 // @route   POST /api/auth/login
 // @access  Public
 export const authUser = async (req, res) => {
-  const { email, password } = req.body;
+  const rawEmail = req.body?.email;
+  const password = req.body?.password;
+  const email = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : '';
+
+  if (!email || !password) {
+    return res.status(400).json({ message: 'Email and password are required' });
+  }
 
   try {
     const user = await User.findOne({ email });

@@ -109,9 +109,28 @@ const FinanceInvoiceSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
   },
+  createdByRole: {
+    type: String,
+  },
+  piApprovalFlow: {
+    status: {
+      type: String,
+      enum: ['not_required', 'pending_admin', 'pending_accounts', 'approved', 'rejected'],
+      default: 'not_required',
+    },
+    adminApprovedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    adminApprovedAt: { type: Date },
+    accountsApprovedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    accountsApprovedAt: { type: Date },
+    rejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    rejectedAt: { type: Date },
+    rejectionReason: { type: String },
+  },
 }, {
   timestamps: true,
 });
+
+FinanceInvoiceSchema.index({ invoiceType: 1, "piApprovalFlow.status": 1, createdAt: -1 });
 
 // Virtual for 'total' to match frontend
 FinanceInvoiceSchema.virtual('total').get(function() {

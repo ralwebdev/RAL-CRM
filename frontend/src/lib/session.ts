@@ -61,6 +61,18 @@ export const session = {
 
   clearSession() {
     inMemoryUser = null;
-    removeRaw(TOKEN_STORAGE_KEY);
+    if (typeof window !== "undefined") {
+      try {
+        const theme = window.localStorage.getItem("theme");
+        window.localStorage.clear();
+        if (theme) {
+          window.localStorage.setItem("theme", theme);
+        }
+      } catch (e) {
+        removeRaw(TOKEN_STORAGE_KEY);
+      }
+    } else {
+      removeRaw(TOKEN_STORAGE_KEY);
+    }
   },
 };

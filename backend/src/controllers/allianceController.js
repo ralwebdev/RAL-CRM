@@ -436,6 +436,10 @@ export const actOnApproval = async (req, res) => {
     const approval = await AllianceApproval.findById(req.params.id);
     if (!approval) return res.status(404).json({ message: 'Approval not found' });
 
+    if (role === 'alliance_executive' || role === 'accounts_executive' || role === 'counselor') {
+      return res.status(403).json({ message: 'Not authorized to act on approvals' });
+    }
+
     const fromStatus = approval.status;
     let toStatus = fromStatus;
 

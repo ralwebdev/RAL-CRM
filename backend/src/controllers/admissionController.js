@@ -2,9 +2,11 @@ import Admission from '../models/Admission.js';
 
 export const getAdmissions = async (req, res) => {
   try {
-    // Shared visibility for admissions across CRM roles.
-    // Avoid over-filtering that can hide records after refresh.
-    const admissions = await Admission.find({});
+    let query = {};
+    if (req.user && req.user.role === 'counselor') {
+      query.counselorId = req.user._id;
+    }
+    const admissions = await Admission.find(query);
     res.json(admissions);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -52,14 +54,20 @@ export const createAdmission = async (req, res) => {
 
 export const updateAdmission = async (req, res) => {
   try {
-    const admission = await Admission.findByIdAndUpdate(
+    let admission = await Admission.findById(req.params.id);
+    if (!admission) {
+      return res.status(404).json({ message: 'Admission not found' });
+    }
+
+    if (req.user.role === 'counselor' && String(admission.counselorId) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'Not authorized to update this admission' });
+    }
+
+    admission = await Admission.findByIdAndUpdate(
       req.params.id,
       req.body,
       { new: true, runValidators: true }
     );
-    if (!admission) {
-      return res.status(404).json({ message: 'Admission not found' });
-    }
     res.json(admission);
   } catch (error) {
     res.status(400).json({ message: error.message });

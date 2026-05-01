@@ -13,7 +13,21 @@ const getStorage = (): Storage | null => {
 };
 
 const memoryStore = new Map<string, string>();
-const canPersist = (key: string) => !SESSION_STORAGE_KEYS.includes(key as (typeof SESSION_STORAGE_KEYS)[number]);
+const canPersist = (key: string) => false; // Disabled localStorage for data stores
+
+// Clean up old mock data from user's browser on app load
+if (typeof window !== "undefined") {
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k && k !== "crm_auth_token" && k !== "theme") {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach(k => window.localStorage.removeItem(k));
+  } catch (e) {}
+}
 
 const parseJSON = <T>(raw: string | null): T | undefined => {
   if (!raw) return undefined;
@@ -37,34 +51,13 @@ const preserveAndClear = (storage: Storage, keysToPreserve: string[]) => {
 
 export const db = {
   createSync<T>(key: string, value: T): T {
-    const payload = JSON.stringify(value);
-    if (!canPersist(key)) {
-      memoryStore.set(key, payload);
-      return value;
-    }
-    const storage = getStorage();
-    if (!storage) return value;
-    try {
-      storage.setItem(key, payload);
-    } catch {
-      // ignore storage write failures in demo mode
-    }
+    memoryStore.set(key, JSON.stringify(value));
     return value;
   },
 
   readSync<T>(key: string, fallback?: T): T | undefined {
-    if (!canPersist(key)) {
-      const parsed = parseJSON<T>(memoryStore.get(key) ?? null);
-      return parsed === undefined ? fallback : parsed;
-    }
-    const storage = getStorage();
-    if (!storage) return fallback;
-    try {
-      const parsed = parseJSON<T>(storage.getItem(key));
-      return parsed === undefined ? fallback : parsed;
-    } catch {
-      return fallback;
-    }
+    const parsed = parseJSON<T>(memoryStore.get(key) ?? null);
+    return parsed === undefined ? fallback : parsed;
   },
 
   updateSync<T>(key: string, updater: Updater<T>, fallback?: T): T {
@@ -74,29 +67,11 @@ export const db = {
   },
 
   deleteSync(key: string) {
-    if (!canPersist(key)) {
-      memoryStore.delete(key);
-      return;
-    }
-    const storage = getStorage();
-    if (!storage) return;
-    try {
-      storage.removeItem(key);
-    } catch {
-      // ignore storage remove failures in demo mode
-    }
+    memoryStore.delete(key);
   },
 
   clearSync(options: ClearOptions = {}) {
     memoryStore.clear();
-    const storage = getStorage();
-    if (!storage) return;
-    const preserve = new Set<string>([TOKEN_STORAGE_KEY, ...(options.preserveKeys ?? [])]);
-    try {
-      preserveAndClear(storage, Array.from(preserve));
-    } catch {
-      // ignore storage clear failures in demo mode
-    }
   },
 
   getOrInitSync<T>(key: string, defaults: T): T {
@@ -106,18 +81,11 @@ export const db = {
   },
 
   keysSync(): string[] {
-    const storage = getStorage();
-    const persisted = storage
-      ? Array.from({ length: storage.length }, (_, idx) => storage.key(idx)).filter((key): key is string => !!key)
-      : [];
-    return Array.from(new Set([...persisted, ...memoryStore.keys()]));
+    return Array.from(memoryStore.keys());
   },
 
   hasSync(key: string): boolean {
-    if (!canPersist(key)) return memoryStore.has(key);
-    const storage = getStorage();
-    if (!storage) return false;
-    return storage.getItem(key) !== null;
+    return memoryStore.has(key);
   },
 
   async create<T>(key: string, value: T): Promise<T> {

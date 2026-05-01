@@ -26,9 +26,7 @@ export const getLeads = async (req, res) => {
           ],
         };
       } else if (req.user.role === 'telecaller') {
-        // Telecaller floor requires shared visibility across telecallers.
-        // Keep full list visible instead of restricting to self-assigned leads.
-        query = {};
+        query = { assignedTelecallerId: req.user._id };
       }
       // admins, marketing_managers, and telecalling_managers will use the default {} query to see all leads.
     }
@@ -61,6 +59,13 @@ export const updateLead = async (req, res) => {
     const lead = await Lead.findById(req.params.id);
 
     if (lead) {
+      if (req.user.role === 'telecaller' && String(lead.assignedTelecallerId) !== String(req.user._id)) {
+        return res.status(403).json({ message: 'Not authorized to update this lead' });
+      }
+      if (req.user.role === 'counselor' && String(lead.assignedCounselorId) !== String(req.user._id) && String(lead.walkInCounselor) !== String(req.user._id)) {
+        return res.status(403).json({ message: 'Not authorized to update this lead' });
+      }
+
       const previousCampaignId = lead.campaignId ? String(lead.campaignId) : null;
       Object.assign(lead, req.body);
       const updatedLead = await lead.save();

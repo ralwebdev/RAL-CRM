@@ -14,6 +14,8 @@ import {
   convertPiToTi,
   getPiTiMappings,
   linkExistingTiToPi,
+  adminApprovePi,
+  accountsApprovePi,
   getVendorBills,
   createVendorBill,
   updateVendorBill,
@@ -49,6 +51,12 @@ router.route('/invoices')
   .post(authorize('admin', 'accounts_manager', 'accounts_executive', 'owner'), createInvoice);
 router.route('/invoices/:id')
   .put(authorize('admin', 'accounts_manager', 'accounts_executive', 'owner'), updateInvoice);
+
+router.route('/invoices/:id/pi/admin-approve')
+  .put(authorize('admin', 'owner'), adminApprovePi);
+
+router.route('/invoices/:id/pi/accounts-approve')
+  .put(authorize('accounts_manager', 'accounts_executive', 'owner'), accountsApprovePi);
 
 // Expense routes
 router.route('/expenses')

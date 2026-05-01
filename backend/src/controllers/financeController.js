@@ -97,9 +97,62 @@ export const createInvoice = async (req, res) => {
     const invoice = new FinanceInvoice({
       ...data,
       createdBy: req.user._id,
+      createdByRole: req.user.role,
     });
+    if (invoice.invoiceType === 'PI') {
+      if (req.user.role !== 'counselor') {
+        return res.status(403).json({ message: 'Only counselor can generate PI requests.' });
+      }
+      invoice.piApprovalFlow = { status: 'pending_admin' };
+      invoice.status = 'Draft';
+    }
     const createdInvoice = await invoice.save();
     res.status(201).json(createdInvoice);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// @desc    Admin approval for PI
+// @route   PUT /api/finance/invoices/:id/pi/admin-approve
+// @access  Private/Admin,Owner
+export const adminApprovePi = async (req, res) => {
+  try {
+    const invoice = await FinanceInvoice.findById(req.params.id);
+    if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
+    if (invoice.invoiceType !== 'PI') return res.status(400).json({ message: 'Only PI supports this flow' });
+    if (invoice.piApprovalFlow?.status !== 'pending_admin') {
+      return res.status(400).json({ message: `PI is not pending admin approval (current: ${invoice.piApprovalFlow?.status || 'n/a'})` });
+    }
+
+    invoice.piApprovalFlow.status = 'pending_accounts';
+    invoice.piApprovalFlow.adminApprovedBy = req.user._id;
+    invoice.piApprovalFlow.adminApprovedAt = new Date();
+    await invoice.save();
+    res.json(invoice);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// @desc    Accounts approval for PI
+// @route   PUT /api/finance/invoices/:id/pi/accounts-approve
+// @access  Private/Accounts
+export const accountsApprovePi = async (req, res) => {
+  try {
+    const invoice = await FinanceInvoice.findById(req.params.id);
+    if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
+    if (invoice.invoiceType !== 'PI') return res.status(400).json({ message: 'Only PI supports this flow' });
+    if (invoice.piApprovalFlow?.status !== 'pending_accounts') {
+      return res.status(400).json({ message: `PI is not pending accounts approval (current: ${invoice.piApprovalFlow?.status || 'n/a'})` });
+    }
+
+    invoice.piApprovalFlow.status = 'approved';
+    invoice.piApprovalFlow.accountsApprovedBy = req.user._id;
+    invoice.piApprovalFlow.accountsApprovedAt = new Date();
+    invoice.status = 'Sent';
+    await invoice.save();
+    res.json(invoice);
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
@@ -112,6 +165,9 @@ export const updateInvoice = async (req, res) => {
   try {
     const invoice = await FinanceInvoice.findById(req.params.id);
     if (invoice) {
+      if (req.user.role === 'accounts_executive' && (invoice.status !== 'Draft' || invoice.piApprovalFlow?.status === 'approved')) {
+        return res.status(403).json({ message: 'Accounts Executive cannot edit verified or sent invoices' });
+      }
       Object.assign(invoice, req.body);
       const updatedInvoice = await invoice.save();
       res.json(updatedInvoice);
@@ -255,6 +311,9 @@ export const convertPiToTi = async (req, res) => {
     const pi = await FinanceInvoice.findById(piId);
     if (!pi) return res.status(404).json({ message: 'Proforma Invoice not found' });
     if (pi.invoiceType !== 'PI') return res.status(400).json({ message: 'Only PI can be converted' });
+    if (pi.piApprovalFlow?.status !== 'approved') {
+      return res.status(400).json({ message: 'PI must be approved by Admin and Accounts before conversion.' });
+    }
 
     // Create TI
     const now = new Date();

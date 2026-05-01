@@ -598,7 +598,7 @@ export default function AdmissionsPage() {
                 <th className="p-4 font-medium">Batch</th>
                 <th className="p-4 font-medium">Fee</th>
                 <th className="p-4 font-medium">Payment</th>
-                {/* <th className="p-4 font-medium">Actions</th> */}
+                <th className="p-4 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -617,15 +617,15 @@ export default function AdmissionsPage() {
                   <td className="p-4 font-medium text-card-foreground">₹{a.totalFee.toLocaleString()}</td>
                   <td className="p-4">
                     <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${a.paymentStatus === "Paid" ? "bg-success/10 text-success" :
-                        a.paymentStatus === "Partial" ? "bg-warning/10 text-warning" :
-                          "bg-muted text-muted-foreground"
+                      a.paymentStatus === "Partial" ? "bg-warning/10 text-warning" :
+                        "bg-muted text-muted-foreground"
                       }`}>{a.paymentStatus}</span>
                   </td>
-                  {/* <td className="p-4">
+                  <td className="p-4">
                     <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setPaymentDialogAdm(a); }}>
                       <CreditCard className="mr-1 h-3.5 w-3.5" />Pay
                     </Button>
-                  </td> */}
+                  </td>
                 </tr>
               ))}
               {admissions.length === 0 && (

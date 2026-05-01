@@ -14,11 +14,11 @@ router.use(protect);
 
 router.route('/')
   .get(getCollections)
-  .post(createCollection);
+  .post(authorize('admin', 'owner', 'counselor'), createCollection);
 
 router.route('/:id')
   .get(getCollectionById)
-  .put(updateCollection);
+  .put(authorize('admin', 'owner', 'counselor'), updateCollection);
 
 router.route('/:id/verify')
   .put(authorize('admin', 'accounts_manager', 'accounts_executive', 'owner'), verifyCollection);
