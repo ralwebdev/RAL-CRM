@@ -1,24 +1,24 @@
 import mongoose from 'mongoose';
 
 const PaymentHistorySchema = new mongoose.Schema({
-  paymentDate: { type: String, required: true },
-  amountPaid: { type: Number, required: true },
-  paymentMode: { type: String, required: true },
+  paymentDate: { type: String, required: [true, 'Payment date is required'] },
+  amountPaid: { type: Number, required: [true, 'Amount paid is required'] },
+  paymentMode: { type: String, required: [true, 'Payment mode is required'] },
   referenceNumber: { type: String },
   paymentType: { type: String },
   emiNumber: { type: Number, default: null },
 });
 
 const AdmissionSchema = new mongoose.Schema({
-  leadId: { type: mongoose.Schema.Types.ObjectId, ref: 'Lead', required: true },
-  studentName: { type: String, required: true },
-  phone: { type: String, required: true },
-  email: { type: String, required: true },
-  courseSelected: { type: String, required: true },
+  leadId: { type: mongoose.Schema.Types.ObjectId, ref: 'Lead', required: [true, 'Lead ID is required'] },
+  studentName: { type: String, required: [true, 'Student name is required'] },
+  phone: { type: String, required: [true, 'Phone number is required'] },
+  email: { type: String, required: [true, 'Email is required'] },
+  courseSelected: { type: String, required: [true, 'Course selection is required'] },
   batch: { type: String }, // Renamed from batchAssigned for frontend sync
-  admissionDate: { type: String, required: true },
-  totalFee: { type: Number, required: true },
-  feePaid: { type: Number, default: 0 }, // Changed from required: true to default: 0
+  admissionDate: { type: String, required: [true, 'Admission date is required'] },
+  totalFee: { type: Number, required: [true, 'Total fee is required'] },
+  feePaid: { type: Number, default: 0 },
   paymentStatus: { type: String, enum: ['Pending', 'Partial', 'Paid'], default: 'Pending' },
   paymentMode: { type: String },
   chequeNumber: { type: String },

@@ -408,12 +408,16 @@ export default function AdmissionsPage() {
   });
 
   const [form, setForm] = useState({
-    leadId: "", courseSelected: "", batch: "", admissionDate: "", totalFee: "",
+    leadId: "", courseSelected: "", batch: "", admissionDate: new Date().toISOString().split("T")[0], totalFee: "",
     paymentStatus: "Pending" as PaymentStatus,
     parentName: "", parentPhone: "", studentBankName: "", parentBankName: "",
   });
 
   const handleCreate = async () => {
+    if (!form.leadId || !form.courseSelected || !form.admissionDate || !form.totalFee) {
+      toast.error("Please fill all required fields");
+      return;
+    }
     const lead = leads.find((l) => l.id === form.leadId);
     if (!lead) return;
     const newAdm: Admission = {
@@ -569,7 +573,7 @@ export default function AdmissionsPage() {
                 <div><Label>Parent Bank</Label><Input value={form.parentBankName} onChange={(e) => setForm({ ...form, parentBankName: e.target.value })} /></div>
               </div>
 
-              <Button onClick={handleCreate} className="w-full" disabled={!form.leadId || !form.courseSelected}>Create Admission</Button>
+              <Button onClick={handleCreate} className="w-full" disabled={!form.leadId || !form.courseSelected || !form.admissionDate || !form.totalFee}>Create Admission</Button>
             </div>
           </DialogContent>
         </Dialog>

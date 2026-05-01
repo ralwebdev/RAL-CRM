@@ -124,6 +124,7 @@ export function AdminBillingTab() {
   // ── Buckets ──
   const pendingVerification = items.filter(c =>
     c.collectorRole === "counselor" && (
+      c.status === "Collected" ||
       c.status === "Awaiting Verification" ||
       c.status === "Mismatch" ||
       c.invoiceRequest?.status === "awaiting_admin_review"

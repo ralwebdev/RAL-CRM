@@ -33,6 +33,7 @@ export const createAdmission = async (req, res) => {
     }
 
     const admission = new Admission(payload);
+    console.log('Creating Admission with payload:', JSON.stringify(payload, null, 2));
     const createdAdmission = await admission.save();
     res.status(201).json(createdAdmission);
   } catch (error) {

@@ -26,6 +26,7 @@ import {
   verifyCollection, rejectCollection, markReadyForInvoice, linkTiToCollection,
   getAllAuditEntries, type Collection,
 } from "@/lib/collection-store";
+import { approvalStore, type ApprovalRequest } from "@/lib/approvals";
 import {
   notifyVerified, notifyMismatch, notifyTiGeneratedFromCollection,
   scanStalePendingVerifications,
@@ -66,8 +67,22 @@ export function VerificationsTab({ canVerify }: { canVerify: boolean }) {
   // Surface stale 24h alerts once on mount
   useMemo(() => scanStalePendingVerifications(items), [items.length]);
 
-  const awaiting = items.filter(c => c.status === "Awaiting Verification");
+  const awaiting = items.filter(c =>
+    c.status === "Awaiting Verification" ||
+    // Admin-created bills should also be visible in Accounts & Finance verification.
+    (c.status === "Collected" && c.collectorRole === "admin") ||
+    // Counselor-created Admission bills should be verifiable even before explicit submit.
+    (c.status === "Collected" && c.collectorRole === "counselor" && c.reason === "admission_fee"),
+  );
   const mismatch = items.filter(c => c.status === "Mismatch");
+  const allianceApprovedBills = approvalStore
+    .list()
+    .filter((a) =>
+      a.requestType === "Expense Bill" &&
+      a.submittedRole === "alliance_manager" &&
+      a.status === "Approved" &&
+      !(a.meta && (a.meta as Record<string, unknown>).accountsFinanceVerified === true),
+    );
   const todayKey = new Date().toDateString();
   const cashToday = items
     .filter(c => c.mode === "cash" && c.verifiedAt && new Date(c.verifiedAt).toDateString() === todayKey)
@@ -162,6 +177,62 @@ export function VerificationsTab({ canVerify }: { canVerify: boolean }) {
                   <TableCell className="text-xs text-muted-foreground">{c.verificationRemarks || "—"}</TableCell>
                   <TableCell className="text-right">
                     <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setVerifyTarget(c)}>Re-verify</Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
+
+      {allianceApprovedBills.length > 0 && (
+        <Card className="p-0">
+          <div className="p-4 border-b">
+            <h3 className="text-sm font-semibold">Alliance Manager Approved Bills ({allianceApprovedBills.length})</h3>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Cross-check approved Alliance bills and mark as verified in Accounts &amp; Finance.</p>
+          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Title</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead className="text-right">Amount</TableHead>
+                <TableHead>Approved At</TableHead>
+                <TableHead className="text-right">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {allianceApprovedBills.map((b) => (
+                <TableRow key={b.id}>
+                  <TableCell className="text-xs">{b.title}</TableCell>
+                  <TableCell className="text-xs">{b.requestType}</TableCell>
+                  <TableCell className="text-right text-xs tabular-nums">{fmtINR(b.amount ?? 0)}</TableCell>
+                  <TableCell className="text-xs">{fmtDateTime(b.updatedAt)}</TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => {
+                        const all = approvalStore.list();
+                        const idx = all.findIndex((x) => x.id === b.id);
+                        if (idx < 0) return;
+                        const cur = all[idx] as ApprovalRequest;
+                        all[idx] = {
+                          ...cur,
+                          meta: {
+                            ...(cur.meta || {}),
+                            accountsFinanceVerified: true,
+                            accountsFinanceVerifiedAt: new Date().toISOString(),
+                            accountsFinanceVerifiedBy: currentUser?.name || "Accounts",
+                          },
+                          updatedAt: new Date().toISOString(),
+                        };
+                        approvalStore.saveAll(all);
+                        toast.success("Alliance bill marked as verified.");
+                      }}
+                    >
+                      Mark Verified
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))}
