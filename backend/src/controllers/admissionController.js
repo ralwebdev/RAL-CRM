@@ -32,6 +32,15 @@ export const createAdmission = async (req, res) => {
       payload.counselorId = req.user._id;
     }
 
+    // Validate foreign key: leadId
+    if (payload.leadId) {
+      const Lead = (await import('../models/Lead.js')).default;
+      const leadExists = await Lead.findById(payload.leadId);
+      if (!leadExists) {
+        return res.status(400).json({ message: 'Invalid leadId: Lead does not exist.' });
+      }
+    }
+
     const admission = new Admission(payload);
     console.log('Creating Admission with payload:', JSON.stringify(payload, null, 2));
     const createdAdmission = await admission.save();

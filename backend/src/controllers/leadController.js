@@ -21,7 +21,7 @@ export const getLeads = async (req, res) => {
       if (req.user.role === 'counselor') {
         query = {
           $or: [
-            { assignedCounselor: req.user._id },
+            { assignedCounselorId: req.user._id },
             { walkInCounselor: req.user._id },
           ],
         };

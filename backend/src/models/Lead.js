@@ -99,7 +99,7 @@ const LeadSchema = new mongoose.Schema({
   temperature: { type: String, enum: ["Hot", "Warm", "Cold", "Dormant"] },
 
   // Ownership & Timeline
-  assignedCounselor: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  assignedCounselorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   leadOwner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   transferHistory: [LeadTransferSchema],
   activities: [LeadActivitySchema],
