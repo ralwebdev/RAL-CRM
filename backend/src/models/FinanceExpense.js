@@ -73,6 +73,18 @@ const FinanceExpenseSchema = new mongoose.Schema({
   attachmentRef: {
     type: String,
   },
+  sourceModule: {
+    type: String,
+    enum: ['finance', 'alliance'],
+    default: 'finance',
+  },
+  sourceId: {
+    type: String,
+  },
+  sourceApprovalId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'AllianceApproval',
+  },
 }, {
   timestamps: true,
 });
@@ -84,6 +96,10 @@ FinanceExpenseSchema.virtual('id').get(function() {
 FinanceExpenseSchema.index({ requestedBy: 1, createdAt: -1 });
 FinanceExpenseSchema.index({ approvedBy: 1, createdAt: -1 });
 FinanceExpenseSchema.index({ submittedById: 1, createdAt: -1 });
+FinanceExpenseSchema.index(
+  { sourceModule: 1, sourceId: 1 },
+  { unique: true, partialFilterExpression: { sourceModule: 'alliance', sourceId: { $exists: true } } }
+);
 
 FinanceExpenseSchema.set('toJSON', {
   virtuals: true,

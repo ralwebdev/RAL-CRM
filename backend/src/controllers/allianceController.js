@@ -9,6 +9,69 @@ import FinanceExpense from '../models/FinanceExpense.js';
 import User from '../models/User.js';
 import { AllianceApproval, AllianceApprovalLog } from '../models/AllianceApproval.js';
 
+const allianceExpenseCategoryMap = {
+  Travel: 'Travel',
+  Meals: 'Misc',
+  'Print Material': 'Marketing',
+  Gifts: 'Marketing',
+  Accommodation: 'Travel',
+  Misc: 'Misc',
+};
+
+const generateFinanceExpenseNo = async () => {
+  const now = new Date();
+  const monthKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const count = await FinanceExpense.countDocuments({
+    expenseNo: new RegExp(`^EXP-${monthKey}`)
+  });
+  return `EXP-${monthKey}-${String(count + 1).padStart(4, '0')}`;
+};
+
+const syncApprovedAllianceExpenseToFinance = async (allianceExpense, approval, approvedBy) => {
+  const sourceId = allianceExpense._id.toString();
+  const existingExpense = await FinanceExpense.findOne({ sourceModule: 'alliance', sourceId });
+  const executive = await User.findById(allianceExpense.executiveId).select('name role');
+  const institution = await AllianceInstitution.findById(allianceExpense.institutionId).select('name');
+  const amount = Number(allianceExpense.amount || 0);
+  const title = `${allianceExpense.expenseType} alliance expense`;
+  const descriptionParts = [
+    approval.notes || allianceExpense.notes,
+    institution?.name ? `Institution: ${institution.name}` : null,
+    `Alliance expense ID: ${sourceId}`,
+  ].filter(Boolean);
+
+  const financeExpenseData = {
+    title,
+    category: allianceExpenseCategoryMap[allianceExpense.expenseType] || 'Misc',
+    amount,
+    gst: 0,
+    total: Math.round(amount * 100) / 100,
+    date: allianceExpense.expenseDate,
+    description: descriptionParts.join(' | '),
+    status: 'Approved',
+    vendorName: institution?.name || 'Alliance',
+    requestedBy: allianceExpense.executiveId,
+    submittedBy: executive?.name || 'Alliance',
+    submittedById: allianceExpense.executiveId,
+    submittedByRole: executive?.role || 'alliance_executive',
+    approvedBy,
+    attachmentRef: allianceExpense.billUrl || undefined,
+    sourceModule: 'alliance',
+    sourceId,
+    sourceApprovalId: approval._id,
+  };
+
+  if (existingExpense) {
+    Object.assign(existingExpense, financeExpenseData);
+    return existingExpense.save();
+  }
+
+  return FinanceExpense.create({
+    ...financeExpenseData,
+    expenseNo: await generateFinanceExpenseNo(),
+  });
+};
+
 // @desc    Get all alliance institutions (Scoped by RBAC)
 // @route   GET /api/alliances/institutions
 // @access  Private
@@ -489,6 +552,10 @@ export const actOnApproval = async (req, res) => {
           else if (toStatus === 'Rejected') allianceExpense.status = 'Rejected';
           else if (toStatus === 'Overridden') allianceExpense.status = 'Approved';
           await allianceExpense.save();
+
+          if (toStatus === 'Approved' || toStatus === 'Overridden') {
+            await syncApprovedAllianceExpenseToFinance(allianceExpense, approval, _id);
+          }
         }
       } catch (err) {
         console.error('Failed to sync back to AllianceExpense:', err);
