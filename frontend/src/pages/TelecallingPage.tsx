@@ -165,10 +165,11 @@ export default function TelecallingPage() {
     scheduleWalkIn: boolean;
     walkInDate: string;
     walkInTime: string;
+    meetingMode: "Online" | "Offline" | "";
   }>({
     outcome: "", notes: "", notInterestedReason: "", followUpDate: "", followUpTime: "",
     followUpType: "", callbackDate: "", callbackTime: "",
-    insight: {}, scheduleWalkIn: false, walkInDate: "", walkInTime: "",
+    insight: {}, scheduleWalkIn: false, walkInDate: "", walkInTime: "", meetingMode: "",
   });
   const [outcomeError, setOutcomeError] = useState("");
 
@@ -313,7 +314,7 @@ export default function TelecallingPage() {
   const openWorkspace = (lead: Lead) => {
     setSelectedLead(lead);
     setShowOutcomeForm(false);
-    setOutcomeForm({ outcome: "", notes: "", notInterestedReason: "", followUpDate: "", followUpTime: "", followUpType: "", callbackDate: "", callbackTime: "", insight: {}, scheduleWalkIn: false, walkInDate: "", walkInTime: "" });
+    setOutcomeForm({ outcome: "", notes: "", notInterestedReason: "", followUpDate: "", followUpTime: "", followUpType: "", callbackDate: "", callbackTime: "", insight: {}, scheduleWalkIn: false, walkInDate: "", walkInTime: "", meetingMode: "" });
     setOutcomeError("");
   };
 
@@ -369,7 +370,7 @@ export default function TelecallingPage() {
                 id: `act${Date.now()}`,
                 leadId: selectedLead.id,
                 type: "Walk-in Scheduled",
-                description: `Walk-in scheduled for ${outcomeForm.walkInDate}`,
+                description: `Walk-in scheduled for ${outcomeForm.walkInDate}${outcomeForm.meetingMode ? ` (${outcomeForm.meetingMode})` : ""}`,
                 timestamp: new Date().toISOString(),
               },
             ],
@@ -419,7 +420,7 @@ export default function TelecallingPage() {
       setSelectedLead(null);
     }
     setShowOutcomeForm(false);
-    setOutcomeForm({ outcome: "", notes: "", notInterestedReason: "", followUpDate: "", followUpTime: "", followUpType: "", callbackDate: "", callbackTime: "", insight: {}, scheduleWalkIn: false, walkInDate: "", walkInTime: "" });
+    setOutcomeForm({ outcome: "", notes: "", notInterestedReason: "", followUpDate: "", followUpTime: "", followUpType: "", callbackDate: "", callbackTime: "", insight: {}, scheduleWalkIn: false, walkInDate: "", walkInTime: "", meetingMode: "" });
     setOutcomeError("");
   };
 
@@ -747,9 +748,15 @@ export default function TelecallingPage() {
                             </Select>
                           </div>
                           <div>
-                            <Label className="text-xs">Placement Expectation</Label>
-                            <Input placeholder="e.g. Within 6 months" value={outcomeForm.insight.placementExpectation || ""}
-                              onChange={(e) => setOutcomeForm({ ...outcomeForm, insight: { ...outcomeForm.insight, placementExpectation: e.target.value } })} className="h-8 text-sm" />
+                            <Label className="text-xs">Placement Expectation (months)</Label>
+                            <Select value={outcomeForm.insight.placementExpectation || ""} onValueChange={(v) => setOutcomeForm({ ...outcomeForm, insight: { ...outcomeForm.insight, placementExpectation: v } })}>
+                              <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select months" /></SelectTrigger>
+                              <SelectContent>
+                                {Array.from({ length: 12 }, (_, i) => String((i + 1) * 3)).map((month) => (
+                                  <SelectItem key={month} value={month}>{month} months</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </div>
                           <div>
                             <Label className="text-xs">Objections</Label>
@@ -802,7 +809,7 @@ export default function TelecallingPage() {
                               <Label htmlFor="scheduleWalkIn" className="text-xs font-semibold text-primary cursor-pointer">Schedule Walk-In Counseling</Label>
                             </div>
                             {outcomeForm.scheduleWalkIn && (
-                              <div className="grid grid-cols-3 gap-3 rounded-lg border border-success/20 bg-success/5 p-3">
+                              <div className="grid grid-cols-4 gap-3 rounded-lg border border-success/20 bg-success/5 p-3">
                                 <div>
                                   <Label className="text-xs">Walk-In Date</Label>
                                   <Input type="date" value={outcomeForm.walkInDate} onChange={(e) => setOutcomeForm({ ...outcomeForm, walkInDate: e.target.value })} className="h-8 text-sm" />
@@ -810,6 +817,16 @@ export default function TelecallingPage() {
                                 <div>
                                   <Label className="text-xs">Walk-In Time</Label>
                                   <Input type="time" value={outcomeForm.walkInTime} onChange={(e) => setOutcomeForm({ ...outcomeForm, walkInTime: e.target.value })} className="h-8 text-sm" />
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Meeting Mode</Label>
+                                  <Select value={outcomeForm.meetingMode} onValueChange={(v) => setOutcomeForm({ ...outcomeForm, meetingMode: v as "Online" | "Offline" })}>
+                                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select mode" /></SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="Online">Online</SelectItem>
+                                      <SelectItem value="Offline">Offline</SelectItem>
+                                    </SelectContent>
+                                  </Select>
                                 </div>
                                 <div>
                                   <Label className="text-xs">Counselor</Label>
