@@ -266,11 +266,11 @@ export function MarketingDashboard() {
         <p className="text-sm text-muted-foreground">Campaign performance and marketing ROI</p>
       </div>
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
-        <StatCard title="Campaign Spend" value={`?${totalSpend.toLocaleString()}`} icon={<DollarSign className="h-5 w-5" />} />
+        <StatCard title="Campaign Spend" value={` ₹ ${totalSpend.toLocaleString()}`} icon={<DollarSign className="h-5 w-5" />} />
         <StatCard title="Leads Generated" value={totalLeads} icon={<Users className="h-5 w-5" />} />
-        <StatCard title="Cost Per Lead" value={`?${avgCPL}`} icon={<TrendingUp className="h-5 w-5" />} />
+        <StatCard title="Cost Per Lead" value={` ₹ ${avgCPL}`} icon={<TrendingUp className="h-5 w-5" />} />
         <StatCard title="ROAS" value={`${roas}x`} icon={<BarChart3 className="h-5 w-5" />} />
-        <StatCard title="CAC" value={`?${cac.toLocaleString()}`} icon={<Target className="h-5 w-5" />} />
+        <StatCard title="CAC" value={`₹ ${cac.toLocaleString()}`} icon={<Target className="h-5 w-5" />} />
       </div>
 
       {/* Lead source pie */}

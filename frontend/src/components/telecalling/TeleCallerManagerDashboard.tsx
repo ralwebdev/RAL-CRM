@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { store } from "@/lib/mock-data";
+import { store, subscribeStore } from "@/lib/mock-data";
 import { StatCard } from "@/components/StatCard";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -53,6 +53,16 @@ export function TeleCallerManagerDashboard() {
     };
   }, []);
 
+  useEffect(():any => {
+    // Keep manager dashboard in sync with live telecaller updates written to shared store.
+    return subscribeStore(() => {
+      setLeads(store.getLeads());
+      setAdmissions(store.getAdmissions());
+      setCallLogs(store.getCallLogs());
+      setUsers(store.getUsers());
+    });
+  }, []);
+
   const telecallers = useMemo(() => users.filter((u) => u.role === "telecaller"), [users]);
 
   const conversionData = useMemo(
@@ -96,6 +106,19 @@ export function TeleCallerManagerDashboard() {
   const totalCallsToday = callLogs.filter((cl) => cl.createdAt === today).length;
   const totalConnectedToday = callLogs.filter((cl) => cl.createdAt === today && (cl.outcome === "Connected" || cl.outcome === "Interested")).length;
   const totalActiveLeads = leads.filter((l) => l.status !== "Admission" && l.status !== "Lost").length;
+  const backendNudges = useMemo(() => {
+    const items: string[] = [];
+    const staleOver14 = leads.filter((l) => l.status !== "Admission" && l.status !== "Lost" && daysBetween(l.createdAt, today) > 14).length;
+    const uncontactedCount = tcPerf.reduce((sum, tc) => sum + tc.uncontacted, 0);
+    const connRateToday = totalCallsToday > 0 ? (totalConnectedToday / totalCallsToday) * 100 : 0;
+
+    if (staleOver14 > 0) items.push(`${staleOver14} active leads are older than 14 days. Push counseling callbacks today.`);
+    if (uncontactedCount > 0) items.push(`${uncontactedCount} assigned leads are still uncontacted. Rebalance lead allocation.`);
+    if (totalCallsToday > 20 && connRateToday < 30) items.push(`Today's connection rate is ${connRateToday.toFixed(1)}%. Review call timing/script quality.`);
+    if (overallATT > 10) items.push(`Average ATT is ${overallATT} days. Accelerate high-intent lead handoff to counseling.`);
+    if (items.length === 0) items.push("Pipeline health looks stable. Keep daily follow-up discipline to sustain momentum.");
+    return items;
+  }, [leads, tcPerf, totalCallsToday, totalConnectedToday, overallATT, today]);
 
   if (loading) {
     return (
@@ -119,6 +142,15 @@ export function TeleCallerManagerDashboard() {
         <StatCard title="Active Leads" value={totalActiveLeads} icon={<Target className="h-5 w-5" />} />
         <StatCard title="Admissions" value={admissions.length} icon={<GraduationCap className="h-5 w-5" />} />
         <StatCard title="Overall ATT" value={`${overallATT}d`} icon={<Timer className="h-5 w-5" />} />
+      </div>
+
+      <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+        <h3 className="mb-2 text-sm font-semibold text-card-foreground">Backend Nudges</h3>
+        <div className="space-y-1">
+          {backendNudges.map((item) => (
+            <p key={item} className="text-xs text-muted-foreground">- {item}</p>
+          ))}
+        </div>
       </div>
 
       <Tabs defaultValue="performance" className="space-y-4">
@@ -188,7 +220,7 @@ export function TeleCallerManagerDashboard() {
                 <div key={l.id} className="flex items-center justify-between rounded-lg border p-3">
                   <div>
                     <p className="text-sm font-medium text-card-foreground">{l.name}</p>
-                    <p className="text-xs text-muted-foreground">{l.interestedCourse} · {l.source}</p>
+                    <p className="text-xs text-muted-foreground">{l.interestedCourse} ï¿½ {l.source}</p>
                   </div>
                   <Badge variant="outline" className="bg-destructive/10 text-destructive text-[10px]">
                     {daysBetween(l.createdAt, today)} days old

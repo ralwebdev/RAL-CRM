@@ -1,7 +1,9 @@
-import { useMemo, useState } from "react";
-import { store, COURSE_FEE_TIERS, getFeeBand } from "@/lib/mock-data";
+import { useEffect, useMemo, useState } from "react";
+import { store, COURSE_FEE_TIERS, getFeeBand, subscribeStore } from "@/lib/mock-data";
 import { MASTER_COURSES } from "@/lib/master-schema";
 import { db } from "@/lib/db";
+import { fetchMarketingAdmissions, fetchMarketingLeads } from "@/lib/marketing-api";
+import { fetchTelecallingCallLogs, fetchTelecallingFollowUps, fetchTelecallingUsers } from "@/lib/telecalling-api";
 import { StatCard } from "@/components/StatCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,18 +40,55 @@ function saveTargets(t: { monthlyTarget: number; roasTarget: number; maxCPA: num
 }
 
 export default function RevenueAnalyticsPage() {
-  const campaigns = store.getCampaigns();
-  const leads = store.getLeads();
-  const admissions = store.getAdmissions();
-  const callLogs = store.getCallLogs();
-  const followUps = store.getFollowUps();
-  const users = store.getUsers();
-  const courses = store.getCourses();
+  const [campaigns, setCampaigns] = useState(store.getCampaigns());
+  const [leads, setLeads] = useState(store.getLeads());
+  const [admissions, setAdmissions] = useState(store.getAdmissions());
+  const [callLogs, setCallLogs] = useState(store.getCallLogs());
+  const [followUps, setFollowUps] = useState(store.getFollowUps());
+  const [users, setUsers] = useState(store.getUsers());
+  const [courses, setCourses] = useState(store.getCourses());
 
   const [targets, setTargets] = useState(getTargets);
   const [editingTargets, setEditingTargets] = useState(false);
   const [tempTargets, setTempTargets] = useState(targets);
   const [activeTab, setActiveTab] = useState("overview");
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const [leadRows, admissionRows, callLogRows, followUpRows, userRows] = await Promise.all([
+          fetchMarketingLeads(),
+          fetchMarketingAdmissions(),
+          fetchTelecallingCallLogs(),
+          fetchTelecallingFollowUps(),
+          fetchTelecallingUsers(),
+        ]);
+        if (!active) return;
+        store.saveLeads(leadRows);
+        store.saveAdmissions(admissionRows);
+        store.saveCallLogs(callLogRows);
+        store.saveFollowUps(followUpRows);
+        store.saveUsers(userRows);
+      } catch {
+        // Keep rendering from current store snapshot if backend sync fails.
+      }
+    };
+    void load();
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    return subscribeStore(() => {
+      setCampaigns(store.getCampaigns());
+      setLeads(store.getLeads());
+      setAdmissions(store.getAdmissions());
+      setCallLogs(store.getCallLogs());
+      setFollowUps(store.getFollowUps());
+      setUsers(store.getUsers());
+      setCourses(store.getCourses());
+    });
+  }, []);
 
   // Core metrics
   const totalRevenue = admissions.reduce((s, a) => s + (a.totalFee || 0), 0);
