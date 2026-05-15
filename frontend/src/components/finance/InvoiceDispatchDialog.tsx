@@ -313,7 +313,7 @@ export function InvoiceDispatchDialog({ invoice, open, onClose }: Props) {
 
             <TabsContent value="preview" className="mt-3">
               <Card className="p-3 bg-muted/30 overflow-auto" style={{ maxHeight: "60vh" }}>
-                <div style={{ transform: "scale(0.7)", transformOrigin: "top left", width: 794 * 0.7 + "px" }}>
+                <div style={{ width: "fit-content", minWidth: "100%" }}>
                   <InvoiceDocument
                     ref={previewRef}
                     invoice={invoice}
