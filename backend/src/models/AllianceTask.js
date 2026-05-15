@@ -33,6 +33,9 @@ const AllianceTaskSchema = new mongoose.Schema({
   timestamps: true
 });
 
+AllianceTaskSchema.index({ institutionId: 1, status: 1, dueDate: 1 });
+AllianceTaskSchema.index({ assignedTo: 1, status: 1, dueDate: 1 });
+
 AllianceTaskSchema.virtual('id').get(function() {
   return this._id.toHexString();
 });

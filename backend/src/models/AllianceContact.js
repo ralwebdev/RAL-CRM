@@ -35,6 +35,8 @@ const AllianceContactSchema = new mongoose.Schema({
   timestamps: true
 });
 
+AllianceContactSchema.index({ institutionId: 1, isPrimary: -1, name: 1 });
+
 AllianceContactSchema.virtual('id').get(function() {
   return this._id.toHexString();
 });

@@ -48,7 +48,7 @@ router.route('/vendor-bills/:id')
 // Invoice routes
 router.route('/invoices')
   .get(authorize('admin', 'accounts_manager', 'accounts_executive', 'owner', 'counselor'), getInvoices)
-  .post(authorize('admin', 'accounts_manager', 'accounts_executive', 'owner'), createInvoice);
+  .post(authorize('admin', 'accounts_manager', 'accounts_executive', 'owner', 'counselor'), createInvoice);
 router.route('/invoices/:id')
   .put(authorize('admin', 'accounts_manager', 'accounts_executive', 'owner'), updateInvoice);
 
@@ -67,6 +67,11 @@ router.route('/expenses/:id')
 
 // Payment routes
 router.route('/payments')
+  .get(authorize('admin', 'accounts_manager', 'accounts_executive', 'owner', 'counselor'), getPayments)
+  .post(authorize('admin', 'accounts_manager', 'accounts_executive', 'owner'), createPayment);
+
+// Alias retained for plan compatibility
+router.route('/collect')
   .get(authorize('admin', 'accounts_manager', 'accounts_executive', 'owner', 'counselor'), getPayments)
   .post(authorize('admin', 'accounts_manager', 'accounts_executive', 'owner'), createPayment);
 

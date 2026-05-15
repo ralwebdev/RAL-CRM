@@ -9,6 +9,11 @@ import FinanceExpense from '../models/FinanceExpense.js';
 import User from '../models/User.js';
 import { AllianceApproval, AllianceApprovalLog } from '../models/AllianceApproval.js';
 
+const ensureInstitutionExists = async (institutionId) => {
+  if (!institutionId) return null;
+  return AllianceInstitution.findById(institutionId).select('_id assignedExecutiveId');
+};
+
 const allianceExpenseCategoryMap = {
   Travel: 'Travel',
   Meals: 'Misc',
@@ -149,8 +154,16 @@ export const deleteInstitution = async (req, res) => {
   try {
     const institution = await AllianceInstitution.findById(req.params.id);
     if (institution) {
+      await Promise.all([
+        AllianceContact.deleteMany({ institutionId: institution._id }),
+        AllianceVisit.deleteMany({ institutionId: institution._id }),
+        AllianceTask.deleteMany({ institutionId: institution._id }),
+        AllianceProposal.deleteMany({ institutionId: institution._id }),
+        AllianceEvent.deleteMany({ institutionId: institution._id }),
+        AllianceExpense.deleteMany({ institutionId: institution._id }),
+      ]);
       await institution.deleteOne();
-      res.json({ message: 'Institution removed' });
+      res.json({ message: 'Institution removed with dependent alliance records' });
     } else {
       res.status(404).json({ message: 'Institution not found' });
     }
@@ -183,6 +196,10 @@ export const getVisits = async (req, res) => {
 // @access  Private
 export const createVisit = async (req, res) => {
   try {
+    const institution = await ensureInstitutionExists(req.body.institutionId);
+    if (!institution) {
+      return res.status(400).json({ message: 'Invalid institutionId' });
+    }
     const canAssignExecutive = ['alliance_manager', 'admin', 'owner'].includes(req.user.role);
     const visit = new AllianceVisit({
       ...req.body,
@@ -245,6 +262,10 @@ export const getProposals = async (req, res) => {
 // @access  Private
 export const createProposal = async (req, res) => {
   try {
+    const institution = await ensureInstitutionExists(req.body.institutionId);
+    if (!institution) {
+      return res.status(400).json({ message: 'Invalid institutionId' });
+    }
     const proposal = new AllianceProposal(req.body);
     const createdProposal = await proposal.save();
     res.status(201).json(createdProposal);
@@ -295,6 +316,10 @@ export const getTasks = async (req, res) => {
 // @access  Private
 export const createTask = async (req, res) => {
   try {
+    const institution = await ensureInstitutionExists(req.body.institutionId);
+    if (!institution) {
+      return res.status(400).json({ message: 'Invalid institutionId' });
+    }
     const task = new AllianceTask({
       ...req.body,
       assignedTo: req.body.assignedTo || req.user._id
@@ -352,6 +377,10 @@ export const getEvents = async (req, res) => {
 // @access  Private
 export const createEvent = async (req, res) => {
   try {
+    const institution = await ensureInstitutionExists(req.body.institutionId);
+    if (!institution) {
+      return res.status(400).json({ message: 'Invalid institutionId' });
+    }
     const event = new AllianceEvent(req.body);
     const createdEvent = await event.save();
     res.status(201).json(createdEvent);
@@ -384,6 +413,10 @@ export const getExpenses = async (req, res) => {
 // @access  Private
 export const createExpense = async (req, res) => {
   try {
+    const institution = await ensureInstitutionExists(req.body.institutionId);
+    if (!institution) {
+      return res.status(400).json({ message: 'Invalid institutionId' });
+    }
     const canAssignExecutive = ['alliance_manager', 'admin', 'owner'].includes(req.user.role);
     const expense = new AllianceExpense({
       ...req.body,
@@ -603,6 +636,10 @@ export const getContacts = async (req, res) => {
 // @access  Private
 export const createContact = async (req, res) => {
   try {
+    const institution = await ensureInstitutionExists(req.body.institutionId);
+    if (!institution) {
+      return res.status(400).json({ message: 'Invalid institutionId' });
+    }
     const contact = new AllianceContact(req.body);
     const createdContact = await contact.save();
     res.status(201).json(createdContact);

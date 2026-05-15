@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+﻿import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useAuth } from "@/lib/auth-context";
 import {
   getFinance, subscribeFinance, recomputeOverdue,
@@ -105,7 +105,7 @@ const ALL_TABS: { id: string; label: string; roles: RoleScope[] }[] = [
   { id: "collections_log", label: "Collection Ledger", roles: ["owner", "manager", "executive"] },
   { id: "invoice_requests", label: "Invoice Requests", roles: ["owner", "manager", "executive"] },
   { id: "verifications", label: "Verifications", roles: ["owner", "manager"] },
-  { id: "verified_payments", label: "Verified → TI", roles: ["owner", "manager", "executive"] },
+  { id: "verified_payments", label: "Verified â†’ TI", roles: ["owner", "manager", "executive"] },
   { id: "collections", label: "Collections", roles: ["owner", "manager", "executive"] },
   { id: "emi", label: "EMI", roles: ["owner", "manager"] },
   { id: "expenses", label: "Expenses", roles: ["owner", "manager", "executive"] },
@@ -163,7 +163,7 @@ export function AccountsModule() {
     }
   }, [tab, tabs]);
 
-  // Admin gets a focused, single-tab Verification Control Center —
+  // Admin gets a focused, single-tab Verification Control Center â€”
   // no duplicate Billing Chart, no invoice issuance surfaces.
   if (isAdmin) return <AdminBillingTab />;
 
@@ -175,11 +175,11 @@ export function AccountsModule() {
             <Wallet className="h-6 w-6 text-primary" /> Accounts & Finance
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            CFO command center · {role === "owner" ? "Full visibility" : role === "manager" ? "Operations & approvals" : "Data entry & verification"}
+            CFO command center Â· {role === "owner" ? "Full visibility" : role === "manager" ? "Operations & approvals" : "Data entry & verification"}
           </p>
         </div>
         <Badge variant="outline" className="w-fit">
-          Logged in as {currentUser?.name} · {currentUser?.role.replace("_", " ")}
+          Logged in as {currentUser?.name} Â· {currentUser?.role.replace("_", " ")}
         </Badge>
       </header>
 
@@ -215,9 +215,10 @@ export function AccountsModule() {
   );
 }
 
-/* ───────── Dashboard ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function DashboardTab({ onJump }: { onJump: (id: string) => void }) {
   const fin = useFinance();
+  const [isClient, setIsClient] = useState(false);
   const collections = useCollections();
   const edits = useSyncExternalStore(subscribeInvoiceEdits, getInvoiceEdits, getInvoiceEdits);
   const todayKey = new Date().toDateString();
@@ -248,7 +249,7 @@ function DashboardTab({ onJump }: { onJump: (id: string) => void }) {
     acc[i.revenueStream] = (acc[i.revenueStream] || 0) + i.amountPaid;
     return acc;
   }, {});
-  const topStream = Object.entries(byStream).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
+  const topStream = Object.entries(byStream).sort((a, b) => b[1] - a[1])[0]?.[0] || "â€”";
 
   const trend = useMemo(() => {
     const months: Record<string, { name: string; revenue: number; expense: number }> = {};
@@ -288,7 +289,11 @@ function DashboardTab({ onJump }: { onJump: (id: string) => void }) {
   if (outstanding > 50000) nudges.push(`${fmtINR(outstanding)} dues outstanding. Push collections this week.`);
   if (emiOverdue > 0) nudges.push(`${emiOverdue} EMI account${emiOverdue > 1 ? "s" : ""} overdue today.`);
   if (vendorPayables > 0) nudges.push(`${fmtINR(vendorPayables)} payable to vendors.`);
-  if (totalCollected > totalExpenses * 1.5) nudges.push(`Strong month — collections are 1.5× your spend.`);
+  if (totalCollected > totalExpenses * 1.5) nudges.push(`Strong month â€” collections are 1.5Ã— your spend.`);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   return (
     <div className="space-y-5">
@@ -313,7 +318,7 @@ function DashboardTab({ onJump }: { onJump: (id: string) => void }) {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <FinanceKpi label="Gross Billing" value={fmtINR(billingRaised)} hint="PI only · GST inclusive" tone="primary" icon={<FileText className="h-4 w-4" />} onClick={() => onJump("billing")} />
+        <FinanceKpi label="Gross Billing" value={fmtINR(billingRaised)} hint="PI only Â· GST inclusive" tone="primary" icon={<FileText className="h-4 w-4" />} onClick={() => onJump("billing")} />
         <FinanceKpi label="Net Revenue" value={fmtINR(totalBilled - gstOutput)} hint="Excl. GST" tone="success" icon={<TrendingUp className="h-4 w-4" />} onClick={() => onJump("revenue")} />
         <FinanceKpi label="GST Collected" value={fmtINR(gstOutput)} hint="Output tax" tone="primary" icon={<BadgePercent className="h-4 w-4" />} onClick={() => onJump("gst")} />
         <FinanceKpi label="Vendor Payables" value={fmtINR(vendorPayables)} tone="warning" onClick={() => onJump("vendors")} />
@@ -323,7 +328,7 @@ function DashboardTab({ onJump }: { onJump: (id: string) => void }) {
         <FinanceKpi label="Collection Eff." value={`${collectionEff.toFixed(1)}%`} tone={collectionEff > 70 ? "success" : "warning"} />
         <FinanceKpi label="Budget Variance" value={<BudgetVariance />} tone="default" onClick={() => onJump("budgets")} />
         <FinanceKpi label="Invoice Edits Today" value={editsToday} hint={`${edits.length} all-time`} tone={editsToday > 0 ? "primary" : "default"} icon={<Pencil className="h-4 w-4" />} onClick={() => onJump("billing")} />
-        <FinanceKpi label="High-Value Changes" value={highValueChanges} hint=">₹2.5L" tone={highValueChanges > 0 ? "warning" : "default"} icon={<AlertTriangle className="h-4 w-4" />} />
+        <FinanceKpi label="High-Value Changes" value={highValueChanges} hint=">â‚¹2.5L" tone={highValueChanges > 0 ? "warning" : "default"} icon={<AlertTriangle className="h-4 w-4" />} />
         <FinanceKpi label="Revised Billing" value={fmtINR(revisedBilling)} hint="Net delta" tone={revisedBilling >= 0 ? "success" : "destructive"} />
         <FinanceKpi label="EMI Today" value={fmtINR(emiMetrics.todayDue)} tone={emiMetrics.todayDue > 0 ? "warning" : "default"} icon={<CalIcon className="h-4 w-4" />} onClick={() => onJump("emi")} />
         <FinanceKpi label="Overdue EMI" value={fmtINR(emiMetrics.overdueTotal)} tone={emiMetrics.overdueTotal > 0 ? "destructive" : "success"} icon={<AlertTriangle className="h-4 w-4" />} onClick={() => onJump("emi")} />
@@ -336,17 +341,21 @@ function DashboardTab({ onJump }: { onJump: (id: string) => void }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card className="p-4 lg:col-span-2">
           <h3 className="text-sm font-semibold mb-3">Revenue vs Expense Trend</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <AreaChart data={trend}>
-              <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
-              <XAxis dataKey="name" fontSize={11} />
-              <YAxis fontSize={11} tickFormatter={(v) => v >= 100000 ? `${(v/100000).toFixed(0)}L` : `${v/1000}k`} />
-              <Tooltip formatter={(v: number) => fmtINR(v)} />
-              <Legend />
-              <Area type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" fill="hsl(var(--primary))" fillOpacity={0.2} />
-              <Area type="monotone" dataKey="expense" stroke="#1A1A1A" fill="#1A1A1A" fillOpacity={0.15} />
-            </AreaChart>
-          </ResponsiveContainer>
+          {isClient ? (
+            <ResponsiveContainer width="100%" height={250}>
+              <AreaChart data={trend}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+                <XAxis dataKey="name" fontSize={11} />
+                <YAxis fontSize={11} tickFormatter={(v) => v >= 100000 ? `${(v/100000).toFixed(0)}L` : `${v/1000}k`} />
+                <Tooltip formatter={(v: number) => fmtINR(v)} />
+                <Legend />
+                <Area type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" fill="hsl(var(--primary))" fillOpacity={0.2} />
+                <Area type="monotone" dataKey="expense" stroke="#1A1A1A" fill="#1A1A1A" fillOpacity={0.15} />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[250px] w-full animate-pulse rounded-md bg-muted/40" />
+          )}
         </Card>
         <Card className="p-4">
           <h3 className="text-sm font-semibold mb-3">Revenue by Stream</h3>
@@ -376,7 +385,7 @@ function DashboardTab({ onJump }: { onJump: (id: string) => void }) {
   );
 }
 
-/* ───────── PI / TI Dashboard split ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ PI / TI Dashboard split â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function PiTiDashboardSection({ onJump }: { onJump: (id: string) => void }) {
   const fin = useFinance();
   const split = useMemo(
@@ -393,7 +402,7 @@ function PiTiDashboardSection({ onJump }: { onJump: (id: string) => void }) {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <FinanceKpi label="Receivables (PI)" value={fmtINR(split.piReceivableOpen)} hint="Open Proforma" tone="warning" icon={<FileText className="h-4 w-4" />} onClick={() => onJump("billing")} />
         <FinanceKpi label="Realized Revenue (TI)" value={fmtINR(split.realizedRevenueBilled)} hint={`Collected ${fmtINR(split.realizedRevenueCollected)}`} tone="success" icon={<Receipt className="h-4 w-4" />} onClick={() => onJump("billing")} />
-        <FinanceKpi label="PI→TI Conversion" value={`${split.piToTiConversionPct}%`} hint={`${fmtINR(split.piConverted)} of ${fmtINR(split.piRaised)}`} tone={split.piToTiConversionPct >= 60 ? "success" : "warning"} onClick={() => onJump("reports")} />
+        <FinanceKpi label="PIâ†’TI Conversion" value={`${split.piToTiConversionPct}%`} hint={`${fmtINR(split.piConverted)} of ${fmtINR(split.piRaised)}`} tone={split.piToTiConversionPct >= 60 ? "success" : "warning"} onClick={() => onJump("reports")} />
         <FinanceKpi label="GST Liability (TI)" value={fmtINR(split.gstFromTi)} hint="From TI only" tone="primary" icon={<BadgePercent className="h-4 w-4" />} onClick={() => onJump("gst")} />
       </div>
 
@@ -439,7 +448,7 @@ function BudgetVariance() {
   return <span>{pct >= 0 ? "+" : ""}{pct.toFixed(0)}%</span>;
 }
 
-/* ───────── Revenue ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Revenue â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function RevenueTab() {
   const fin = useFinance();
   const byStream = fin.invoices.reduce<Record<string, { billed: number; collected: number }>>((acc, i) => {
@@ -475,7 +484,7 @@ function RevenueTab() {
   );
 }
 
-/* ───────── Billing (PI / TI unified) ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Billing (PI / TI unified) â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 type BillingFilter = "all" | "pi" | "ti" | "open_pi" | "converted_pi" | "today_ti";
 
 function usePiTi() {
@@ -570,12 +579,12 @@ function BillingTab({ role }: { role: RoleScope }) {
       render: r => {
         if (r.invoiceType === "TI" && r.linkedPiId) {
           const pi = piMap.get(r.linkedPiId);
-          return <span className="text-[11px] text-muted-foreground font-mono">↳ {pi?.invoiceNo ?? "—"}</span>;
+          return <span className="text-[11px] text-muted-foreground font-mono">â†³ {pi?.invoiceNo ?? "â€”"}</span>;
         }
         if (r.invoiceType === "PI" && (r.convertedTiIds?.length ?? 0) > 0) {
           return <span className="text-[11px] text-emerald-700">{r.convertedTiIds!.length} TI{r.convertedTiIds!.length > 1 ? "s" : ""}</span>;
         }
-        return <span className="text-[11px] text-muted-foreground">—</span>;
+        return <span className="text-[11px] text-muted-foreground">â€”</span>;
       },
       exportValue: r => r.linkedPiId ? piMap.get(r.linkedPiId)?.invoiceNo ?? "" : (r.convertedTiIds?.length ? `${r.convertedTiIds.length} TIs` : ""),
     },
@@ -584,10 +593,8 @@ function BillingTab({ role }: { role: RoleScope }) {
     { key: "issue", header: "Issued", render: r => fmtDate(r.issueDate), sortValue: r => r.issueDate, exportValue: r => fmtDate(r.issueDate) },
     {
       key: "due", header: "Due",
-      render: r => r.invoiceType === "TI"
-        ? <span className="text-[11px] text-muted-foreground">—</span>
-        : fmtDate(r.dueDate),
-      sortValue: r => r.dueDate, exportValue: r => r.invoiceType === "TI" ? "" : fmtDate(r.dueDate),
+      render: r => fmtDate(r.dueDate),
+      sortValue: r => r.dueDate, exportValue: r => fmtDate(r.dueDate),
     },
     { key: "total", header: "Amount", render: r => <span className="font-semibold tabular-nums">{fmtINR(r.total)}</span>, sortValue: r => r.total, exportValue: r => r.total },
     {
@@ -643,10 +650,10 @@ function BillingTab({ role }: { role: RoleScope }) {
         <FinanceKpi label="PI Due Today" value={piDueToday} tone={piDueToday > 0 ? "warning" : "default"} onClick={() => setFilter("open_pi")} />
         <FinanceKpi label="PI Overdue" value={piOverdue} tone={piOverdue > 0 ? "destructive" : "success"} icon={<AlertTriangle className="h-4 w-4" />} onClick={() => setFilter("open_pi")} />
         <FinanceKpi label="TI Today" value={tiToday} tone="success" icon={<Receipt className="h-4 w-4" />} onClick={() => setFilter("today_ti")} />
-        <FinanceKpi label="PI→TI Conversion" value={`${conversionPct}%`} tone={conversionPct >= 60 ? "success" : "warning"} onClick={() => setFilter("converted_pi")} />
+        <FinanceKpi label="PIâ†’TI Conversion" value={`${conversionPct}%`} tone={conversionPct >= 60 ? "success" : "warning"} onClick={() => setFilter("converted_pi")} />
         <FinanceKpi label="GST from TI (mo)" value={fmtINR(gstFromTi)} hint="This month" tone="primary" icon={<BadgePercent className="h-4 w-4" />} />
         <FinanceKpi label="Mappings" value={mappings.length} hint={failedMappings > 0 ? `${failedMappings} failed` : "all healthy"} tone={failedMappings > 0 ? "destructive" : "default"} icon={<ArrowRight className="h-4 w-4" />} />
-        <FinanceKpi label="Total Invoices" value={baseVisible.length} hint={`${piList.length} PI · ${tiList.length} TI`} tone="default" />
+        <FinanceKpi label="Total Invoices" value={baseVisible.length} hint={`${piList.length} PI Â· ${tiList.length} TI`} tone="default" />
       </div>
 
       <div className="flex flex-wrap gap-1.5 items-center">
@@ -709,6 +716,7 @@ function BillingTab({ role }: { role: RoleScope }) {
 function InvoiceFormDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { currentUser } = useAuth();
   const { toast } = useToast();
+  const invoiceType: "PI" = "PI";
   const [f, setF] = useState({
     customerName: "", customerType: "Student" as Invoice["customerType"],
     revenueStream: "Student Admissions" as RevenueStream,
@@ -738,7 +746,7 @@ function InvoiceFormDrawer({ open, onClose }: { open: boolean; onClose: () => vo
     const v = validateGstInput(f.amount, effectiveRate);
     if (!v.ok) { toast({ title: v.error || "Invalid amount", variant: "destructive" }); return; }
     const inv = await createInvoiceAsync({
-      invoiceType: "PI",
+      invoiceType,
       customerId: "c_" + Math.random().toString(36).slice(2, 6),
       customerName: f.customerName.trim(), customerType: f.customerType,
       revenueStream: f.revenueStream, programName: f.programName,
@@ -753,7 +761,12 @@ function InvoiceFormDrawer({ open, onClose }: { open: boolean; onClose: () => vo
   };
 
   return (
-    <FinanceDrawer open={open} onOpenChange={(o) => !o && onClose()} title="Create Proforma Invoice (PI)" description="Use PI for dues / receivables before payment. Amount goes to receivables, not collected revenue.">
+    <FinanceDrawer
+      open={open}
+      onOpenChange={(o) => !o && onClose()}
+      title="Create Proforma Invoice (PI)"
+      description="Use PI for dues / receivables before payment. Amount goes to receivables, not collected revenue."
+    >
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <div><Label>Recipient Name</Label><Input value={f.customerName} onChange={e => setF({ ...f, customerName: e.target.value })} /></div>
@@ -784,7 +797,7 @@ function InvoiceFormDrawer({ open, onClose }: { open: boolean; onClose: () => vo
               </SelectContent>
             </Select>
           </div>
-          <div><Label>Discount (₹)</Label><Input type="number" min={0} value={f.discount || ""} onChange={e => setF({ ...f, discount: +e.target.value })} /></div>
+          <div><Label>Discount (â‚¹)</Label><Input type="number" min={0} value={f.discount || ""} onChange={e => setF({ ...f, discount: +e.target.value })} /></div>
           <div className="col-span-2"><Label>GSTIN (optional)</Label><Input value={f.gstin} onChange={e => setF({ ...f, gstin: e.target.value })} placeholder="27AABCS1234F1Z9" /></div>
         </div>
 
@@ -836,7 +849,7 @@ function InvoiceViewDrawer({ invoice, onClose }: { invoice: Invoice | null; onCl
         <Card className="p-3 space-y-2 text-sm">
           <Row k="Status" v={<StatusPill status={invoice.status} tone={statusTone(invoice.status)} />} />
           <Row k="Stream" v={invoice.revenueStream} />
-          <Row k="Program" v={invoice.programName || "—"} />
+          <Row k="Program" v={invoice.programName || "â€”"} />
           <Row k="Issued" v={fmtDate(invoice.issueDate)} />
           <Row k="Due" v={fmtDate(invoice.dueDate)} />
           <Row k="Subtotal" v={fmtINR(invoice.subtotal)} />
@@ -872,7 +885,7 @@ function Row({ k, v }: { k: string; v: React.ReactNode }) {
   return <div className="flex justify-between text-sm"><span className="text-muted-foreground">{k}</span><span>{v}</span></div>;
 }
 
-/* ───────── Collections ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Collections â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function CollectionsTab({ role }: { role: RoleScope }) {
   void role;
   const collections = useCollections();
@@ -882,7 +895,7 @@ function CollectionsTab({ role }: { role: RoleScope }) {
     { key: "cust", header: "Student", render: r => r.studentName, sortValue: r => r.studentName, exportValue: r => r.studentName },
     { key: "amount", header: "Amount", render: r => <span className="font-semibold tabular-nums">{fmtINR(r.amount)}</span>, sortValue: r => r.amount, exportValue: r => r.amount },
     { key: "mode", header: "Mode", render: r => <Badge variant="outline" className="text-[10px]">{r.mode.replace(/_/g, " ")}</Badge>, exportValue: r => r.mode },
-    { key: "ref", header: "Reference", render: r => <span className="font-mono text-xs">{r.txnId || r.chequeNumber || "—"}</span>, exportValue: r => r.txnId || r.chequeNumber || "" },
+    { key: "ref", header: "Reference", render: r => <span className="font-mono text-xs">{r.txnId || r.chequeNumber || "â€”"}</span>, exportValue: r => r.txnId || r.chequeNumber || "" },
     { key: "paid", header: "Collected On", render: r => fmtDate(r.collectedAt), sortValue: r => r.collectedAt, exportValue: r => fmtDate(r.collectedAt) },
     { key: "status", header: "Status", render: r => <Badge variant="outline" className="text-[10px]">{r.status}</Badge>, exportValue: r => r.status },
   ];
@@ -900,7 +913,7 @@ function CollectionsTab({ role }: { role: RoleScope }) {
     </div>
   );
 }
-/* ───────── EMI ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ EMI â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function EmiTab() {
   const fin = useFinance();
   const { currentUser } = useAuth();
@@ -932,7 +945,7 @@ function EmiTab() {
   );
 }
 
-/* ───────── Expenses ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Expenses â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function ExpensesTab({ role }: { role: RoleScope }) {
   const fin = useFinance();
   const { currentUser } = useAuth();
@@ -963,12 +976,12 @@ function ExpensesTab({ role }: { role: RoleScope }) {
   const cols: Column<Expense>[] = [
     { key: "no", header: "Expense #", render: r => <span className="font-mono text-xs">{r.expenseNo}</span>, sortValue: r => r.expenseNo, exportValue: r => r.expenseNo },
     { key: "cat", header: "Category", render: r => <Badge variant="outline" className="text-[10px]">{r.category}</Badge>, exportValue: r => r.category },
-    { key: "vendor", header: "Vendor", render: r => r.vendorName || "—", exportValue: r => r.vendorName || "" },
+    { key: "vendor", header: "Vendor", render: r => r.vendorName || "â€”", exportValue: r => r.vendorName || "" },
     { key: "amt", header: "Amount", render: r => <span className="font-semibold tabular-nums">{fmtINR(r.total)}</span>, sortValue: r => r.total, exportValue: r => r.total },
     { key: "date", header: "Date", render: r => fmtDate(r.spendDate), sortValue: r => r.spendDate, exportValue: r => fmtDate(r.spendDate) },
     { key: "tier", header: "Approver", render: r => {
       try { return <Badge variant="outline" className="text-[10px]">{tierForAmount(r.total).tier.replace(/_/g, " ")}</Badge>; }
-      catch { return <span className="text-xs text-muted-foreground">—</span>; }
+      catch { return <span className="text-xs text-muted-foreground">â€”</span>; }
     }, exportValue: r => { try { return tierForAmount(r.total).tier; } catch { return ""; } } },
     { key: "status", header: "Status", render: r => <StatusPill status={r.status} tone={statusTone(r.status)} />, exportValue: r => r.status },
     {
@@ -1053,8 +1066,8 @@ function ExpenseFormDrawer({ open, onClose }: { open: boolean; onClose: () => vo
           </Select>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <div><Label>Amount (₹)</Label><Input type="number" value={f.amount || ""} onChange={e => setF({ ...f, amount: +e.target.value })} /></div>
-          <div><Label>GST (₹)</Label><Input type="number" value={f.gst || ""} onChange={e => setF({ ...f, gst: +e.target.value })} /></div>
+          <div><Label>Amount (â‚¹)</Label><Input type="number" value={f.amount || ""} onChange={e => setF({ ...f, amount: +e.target.value })} /></div>
+          <div><Label>GST (â‚¹)</Label><Input type="number" value={f.gst || ""} onChange={e => setF({ ...f, gst: +e.target.value })} /></div>
         </div>
         <div><Label>Date</Label><Input type="date" value={f.spendDate} onChange={e => setF({ ...f, spendDate: e.target.value })} /></div>
         <div><Label>Payment Mode</Label>
@@ -1075,7 +1088,7 @@ function ExpenseFormDrawer({ open, onClose }: { open: boolean; onClose: () => vo
   );
 }
 
-/* ───────── Vendors ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Vendors â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function VendorsTab({ role }: { role: RoleScope }) {
   const fin = useFinance();
   const { currentUser } = useAuth();
@@ -1086,14 +1099,14 @@ function VendorsTab({ role }: { role: RoleScope }) {
 
   const vCols: Column<Vendor>[] = [
     { key: "name", header: "Name", render: r => <div><div className="font-medium text-sm">{r.name}</div><div className="text-[11px] text-muted-foreground">{r.category}</div></div>, sortValue: r => r.name, exportValue: r => r.name },
-    { key: "contact", header: "Contact", render: r => r.contactName || "—", exportValue: r => r.contactName || "" },
-    { key: "phone", header: "Phone", render: r => r.phone || "—", exportValue: r => r.phone || "" },
-    { key: "gstin", header: "GSTIN", render: r => <span className="font-mono text-xs">{r.gstin || "—"}</span>, exportValue: r => r.gstin || "" },
+    { key: "contact", header: "Contact", render: r => r.contactName || "â€”", exportValue: r => r.contactName || "" },
+    { key: "phone", header: "Phone", render: r => r.phone || "â€”", exportValue: r => r.phone || "" },
+    { key: "gstin", header: "GSTIN", render: r => <span className="font-mono text-xs">{r.gstin || "â€”"}</span>, exportValue: r => r.gstin || "" },
     {
       key: "due", header: "Open Bills", render: r => {
         const open = fin.vendorBills.filter(b => b.vendorId === r.id && b.status !== "Paid");
         const total = open.reduce((s, b) => s + (b.total - b.paid), 0);
-        return open.length ? <span className="text-amber-600 font-medium tabular-nums">{open.length} · {fmtINR(total)}</span> : <span className="text-muted-foreground">—</span>;
+        return open.length ? <span className="text-amber-600 font-medium tabular-nums">{open.length} Â· {fmtINR(total)}</span> : <span className="text-muted-foreground">â€”</span>;
       }
     },
   ];
@@ -1210,7 +1223,7 @@ function VendorBillFormDrawer({ open, onClose }: { open: boolean; onClose: () =>
   );
 }
 
-/* ───────── Budgets ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Budgets â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function BudgetsTab() {
   const fin = useFinance();
   const { currentUser } = useAuth();
@@ -1283,7 +1296,7 @@ function BudgetForm({ onDone }: { onDone: () => void }) {
   );
 }
 
-/* ───────── Profitability ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Profitability â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function ProfitTab() {
   const fin = useFinance();
   const byStream = fin.invoices.reduce<Record<string, { revenue: number }>>((acc, i) => {
@@ -1332,7 +1345,7 @@ function ProfitTab() {
   );
 }
 
-/* ───────── Cashflow ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Cashflow â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function CashflowTab() {
   const fin = useFinance();
   const inflow = fin.cashflow.filter(c => c.type === "Inflow").reduce((s, c) => s + c.amount, 0);
@@ -1379,7 +1392,7 @@ function CashflowTab() {
   );
 }
 
-/* ───────── GST ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ GST â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function GstTab() {
   const fin = useFinance();
   const output = fin.invoices.reduce((s, i) => s + i.cgst + i.sgst + i.igst, 0);
@@ -1389,7 +1402,7 @@ function GstTab() {
   const cols: Column<Invoice>[] = [
     { key: "no", header: "Invoice #", render: r => <span className="font-mono text-xs">{r.invoiceNo}</span>, exportValue: r => r.invoiceNo },
     { key: "cust", header: "Customer", render: r => r.customerName, exportValue: r => r.customerName },
-    { key: "gstin", header: "GSTIN", render: r => <span className="font-mono text-xs">{r.gstin || "—"}</span>, exportValue: r => r.gstin || "" },
+    { key: "gstin", header: "GSTIN", render: r => <span className="font-mono text-xs">{r.gstin || "â€”"}</span>, exportValue: r => r.gstin || "" },
     { key: "type", header: "Type", render: r => r.gstType, exportValue: r => r.gstType },
     { key: "rate", header: "Rate", render: r => `${r.gstRate}%`, exportValue: r => r.gstRate },
     { key: "cgst", header: "CGST", render: r => fmtINR(r.cgst), exportValue: r => r.cgst },
@@ -1409,7 +1422,7 @@ function GstTab() {
   );
 }
 
-/* ───────── Exports ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Exports â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function ExportsTab() {
   const fin = useFinance();
   const { toast } = useToast();
@@ -1430,7 +1443,7 @@ function ExportsTab() {
       } else {
         downloadFile(`tally_${stamp()}.json`, JSON.stringify(vouchersToJson(preview), null, 2), "application/json");
       }
-      toast({ title: "Export generated successfully.", description: `${preview.length} voucher${preview.length > 1 ? "s" : ""} → ${format.toUpperCase()}` });
+      toast({ title: "Export generated successfully.", description: `${preview.length} voucher${preview.length > 1 ? "s" : ""} â†’ ${format.toUpperCase()}` });
     } catch {
       toast({ title: "Export failed. Please retry.", variant: "destructive" });
     }
@@ -1511,7 +1524,7 @@ function ExportsTab() {
         </Card>
       ) : (
         <Card className="p-0 overflow-hidden">
-          <div className="px-4 py-2 border-b bg-muted/40 text-xs font-medium">Preview · first 25 rows</div>
+          <div className="px-4 py-2 border-b bg-muted/40 text-xs font-medium">Preview Â· first 25 rows</div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="bg-muted/30 text-muted-foreground">
@@ -1533,8 +1546,8 @@ function ExportsTab() {
                     <td className="px-3 py-2 font-mono">{v.voucher_number}</td>
                     <td className="px-3 py-2">{v.ledger_name}</td>
                     <td className="px-3 py-2">{v.party_name}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{v.debit_amount ? fmtINR(v.debit_amount) : "—"}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{v.credit_amount ? fmtINR(v.credit_amount) : "—"}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{v.debit_amount ? fmtINR(v.debit_amount) : "â€”"}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{v.credit_amount ? fmtINR(v.credit_amount) : "â€”"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1545,4 +1558,8 @@ function ExportsTab() {
     </div>
   );
 }
+
+
+
+
 

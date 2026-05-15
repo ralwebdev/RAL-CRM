@@ -46,4 +46,8 @@ backend/*.sw?
 frontend/.env
 backend/.env
 tmp_remote_repo
+IMPLEMENTATION_PLAN.md
+IMPLEMENTATION_SUMMARY.md
+PROJECT_AUDIT_REPORT.md
+MOCK_DATA_FOR_BACKEND.md
 

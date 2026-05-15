@@ -1,5 +1,9 @@
 import Lead from '../models/Lead.js';
 import Campaign from '../models/Campaign.js';
+import Admission from '../models/Admission.js';
+import FollowUp from '../models/FollowUp.js';
+import CallLog from '../models/CallLog.js';
+import Collection from '../models/Collection.js';
 
 async function refreshCampaignMetrics(campaignId) {
   if (!campaignId) return;
@@ -42,6 +46,13 @@ export const getLeads = async (req, res) => {
 // @access  Private
 export const createLead = async (req, res) => {
   try {
+    const duplicateFilter = [{ phone: req.body.phone }];
+    if (req.body.email) duplicateFilter.push({ email: req.body.email });
+    const duplicate = await Lead.findOne({ $or: duplicateFilter });
+    if (duplicate) {
+      return res.status(400).json({ message: 'Lead with same phone or email already exists' });
+    }
+
     const lead = new Lead(req.body);
     const createdLead = await lead.save();
     await refreshCampaignMetrics(createdLead.campaignId);
@@ -59,6 +70,19 @@ export const updateLead = async (req, res) => {
     const lead = await Lead.findById(req.params.id);
 
     if (lead) {
+      if (req.body.phone || req.body.email) {
+        const duplicateFilter = [];
+        if (req.body.phone) duplicateFilter.push({ phone: req.body.phone });
+        if (req.body.email) duplicateFilter.push({ email: req.body.email });
+        const duplicate = await Lead.findOne({
+          _id: { $ne: lead._id },
+          $or: duplicateFilter,
+        });
+        if (duplicate) {
+          return res.status(400).json({ message: 'Lead with same phone or email already exists' });
+        }
+      }
+
       if (req.user.role === 'telecaller' && String(lead.assignedTelecallerId) !== String(req.user._id)) {
         return res.status(403).json({ message: 'Not authorized to update this lead' });
       }
@@ -92,6 +116,13 @@ export const deleteLead = async (req, res) => {
   try {
     const lead = await Lead.findByIdAndDelete(req.params.id);
     if (lead) {
+      const admission = await Admission.findOne({ leadId: lead._id });
+      if (admission) {
+        await Collection.deleteMany({ studentId: admission._id });
+        await Admission.deleteOne({ _id: admission._id });
+      }
+      await FollowUp.deleteMany({ leadId: lead._id });
+      await CallLog.deleteMany({ leadId: lead._id });
       await refreshCampaignMetrics(lead.campaignId);
       res.json({ message: 'Lead removed' });
     } else {

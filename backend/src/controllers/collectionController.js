@@ -93,10 +93,10 @@ export const createCollection = async (req, res) => {
         ...(req.body.studentMobile ? { phone: req.body.studentMobile } : {}),
       });
     }
-    const fallbackStudentId = studentIdIsObjectId
-      ? studentIdRaw
-      : new mongoose.Types.ObjectId();
-    const finalStudentId = resolvedAdmission?._id || fallbackStudentId;
+    if (!resolvedAdmission) {
+      return res.status(400).json({ message: 'Invalid student reference: Admission not found for provided studentId/leadId/studentName' });
+    }
+    const finalStudentId = resolvedAdmission._id;
     const finalReceiptRef = await resolveUniqueReceiptRef(req.body?.receiptRef, req.body?.collectedAt);
 
     const statusFromRole = req.user.role === 'admin' ? (req.body?.status || 'Collected') : 'Awaiting Verification';

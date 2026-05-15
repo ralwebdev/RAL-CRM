@@ -34,6 +34,8 @@ const AllianceEventSchema = new mongoose.Schema({
   timestamps: true
 });
 
+AllianceEventSchema.index({ institutionId: 1, eventDate: -1 });
+
 AllianceEventSchema.virtual('id').get(function() {
   return this._id.toHexString();
 });

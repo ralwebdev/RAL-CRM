@@ -43,6 +43,9 @@ const AllianceVisitSchema = new mongoose.Schema({
   timestamps: true
 });
 
+AllianceVisitSchema.index({ institutionId: 1, visitDate: -1 });
+AllianceVisitSchema.index({ executiveId: 1, visitDate: -1 });
+
 AllianceVisitSchema.virtual('id').get(function() {
   return this._id.toHexString();
 });

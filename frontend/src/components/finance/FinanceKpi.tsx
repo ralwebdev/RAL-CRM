@@ -58,7 +58,7 @@ export const fmtINR = (n: number) =>
       : n.toLocaleString("en-IN"));
 
 export const fmtDate = (iso?: string) =>
-  iso ? new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" }) : "—";
+  iso ? new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" }) : "-";
 
 export function StatusPill({ status, tone }: { status: string; tone?: "success" | "warning" | "destructive" | "muted" | "primary" }) {
   const map = {
@@ -82,3 +82,4 @@ export function statusTone(status: string): "success" | "warning" | "destructive
   if (["overdue", "rejected", "cancelled"].includes(s)) return "destructive";
   return "primary";
 }
+

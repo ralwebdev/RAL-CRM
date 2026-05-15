@@ -35,6 +35,8 @@ const AllianceProposalSchema = new mongoose.Schema({
   timestamps: true
 });
 
+AllianceProposalSchema.index({ institutionId: 1, status: 1, createdAt: -1 });
+
 AllianceProposalSchema.virtual('id').get(function() {
   return this._id.toHexString();
 });

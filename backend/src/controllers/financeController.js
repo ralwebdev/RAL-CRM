@@ -71,11 +71,13 @@ export const getInvoices = async (req, res) => {
 export const createInvoice = async (req, res) => {
   try {
     const data = { ...req.body };
+    const type = data.invoiceType === 'PI' ? 'PI' : 'TI';
+    data.invoiceType = type;
     
     if (!data.invoiceNo) {
       const now = new Date();
       const monthKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
-      const typeKey = data.invoiceType === 'PI' ? 'PI' : 'INV';
+      const typeKey = type === 'PI' ? 'PI' : 'INV';
       const count = await FinanceInvoice.countDocuments({
         invoiceNo: new RegExp(`^${typeKey}-${monthKey}`)
       });
@@ -99,12 +101,18 @@ export const createInvoice = async (req, res) => {
       createdBy: req.user._id,
       createdByRole: req.user.role,
     });
-    if (invoice.invoiceType === 'PI') {
-      if (req.user.role !== 'counselor') {
-        return res.status(403).json({ message: 'Only counselor can generate PI requests.' });
+    if (type === 'PI') {
+      const piAllowedRoles = ['counselor', 'accounts_manager', 'accounts_executive', 'admin', 'owner'];
+      if (!piAllowedRoles.includes(req.user.role)) {
+        return res.status(403).json({ message: 'You are not allowed to generate PI requests.' });
       }
       invoice.piApprovalFlow = { status: 'pending_admin' };
       invoice.status = 'Draft';
+    } else {
+      // TI can be created by accounts/admin/owner; counselor should not create TI directly.
+      if (req.user.role === 'counselor') {
+        return res.status(403).json({ message: 'Counselor can only create PI requests.' });
+      }
     }
     const createdInvoice = await invoice.save();
     res.status(201).json(createdInvoice);

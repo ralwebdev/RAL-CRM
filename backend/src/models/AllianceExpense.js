@@ -39,6 +39,9 @@ const AllianceExpenseSchema = new mongoose.Schema({
   timestamps: true
 });
 
+AllianceExpenseSchema.index({ institutionId: 1, expenseDate: -1, status: 1 });
+AllianceExpenseSchema.index({ executiveId: 1, expenseDate: -1, status: 1 });
+
 AllianceExpenseSchema.virtual('id').get(function() {
   return this._id.toHexString();
 });

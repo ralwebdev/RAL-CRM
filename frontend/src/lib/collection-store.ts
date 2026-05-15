@@ -214,137 +214,94 @@ export function getCollections(): Collection[] { return state; }
 export function resetCollections() { save(seed()); }
 
 async function persistCollectionToAdmissionHistory(c: Collection): Promise<void> {
-  // Only persist when we can confidently map to an Admission document id.
-  if (!objectIdRegex.test(c.studentId)) return;
-  try {
-    const admissionRes = await api.get(`/api/admissions/${c.studentId}`);
-    const admission = admissionRes.data || {};
-    const history = Array.isArray(admission.paymentHistory) ? admission.paymentHistory : [];
-    const exists = history.some((h: any) =>
-      String(h?.referenceNumber || "").trim() === c.receiptRef,
-    );
-    if (exists) return;
-
-    const paymentModeMap: Record<CollectionMode, string> = {
-      cash: "Cash",
-      upi: "UPI",
-      bank_transfer: "Online Transfer",
-      cheque: "Cheque",
-      card: "Online Transfer",
-    };
-
-    const paymentTypeMap: Record<CollectionReason, string> = {
-      admission_fee: "Admission Fee",
-      registration_fee: "Registration",
-      seat_booking: "Seat Booking",
-      emi_payment: "EMI",
-      emi_late_fine: "EMI",
-      id_card_charge: "Registration",
-      rfid_charge: "Registration",
-      stationery_sale: "Registration",
-      misc_approved_charge: "Registration",
-    };
-
-    const paymentEntry = {
-      paymentDate: c.collectedAt,
-      amountPaid: c.amount,
-      paymentMode: paymentModeMap[c.mode] || "Cash",
-      referenceNumber: c.receiptRef,
-      paymentType: paymentTypeMap[c.reason] || "Registration",
-      emiNumber: c.emiInstallmentNo ?? null,
-    };
-
-    await api.put(`/api/admissions/${c.studentId}`, {
-      paymentHistory: [...history, paymentEntry],
-    });
-  } catch {
-    // Keep UI flow non-blocking; backend persistence is best-effort.
-  }
+  // Backend owns Admission.paymentHistory synchronization from collections.
+  // Frontend no-ops here to avoid duplicate write/race conditions.
+  void c;
 }
 
 export async function hydrateCollectionsFromBackend(): Promise<void> {
   const collectionsRes = await api.get("/api/collections");
   const rows = Array.isArray(collectionsRes.data) ? collectionsRes.data : [];
   const mapped: Collection[] = rows.map((raw: any) => ({
-      id: toId(raw),
-      receiptRef: String(raw?.receiptRef || ""),
-      studentId: toId(raw?.studentId),
-      studentName: String(raw?.studentName || raw?.studentId?.studentName || "Student"),
-      studentMobile: raw?.studentMobile ? String(raw.studentMobile) : undefined,
-      courseName: String(raw?.courseName || raw?.studentId?.courseSelected || "Course"),
-      branch: raw?.branch ? String(raw.branch) : undefined,
-      amount: Number(raw?.amount || 0),
-      mode: raw?.mode || "cash",
-      reason: raw?.reason || "admission_fee",
-      collectedAt: raw?.collectedAt ? new Date(raw.collectedAt).toISOString() : new Date().toISOString(),
-      collectedById: toId(raw?.collectedById),
-      collectedByName: String(raw?.collectedByName || raw?.collectedById?.name || "Unknown"),
-      collectorRole: raw?.collectorRole || "counselor",
-      remarks: raw?.remarks ? String(raw.remarks) : undefined,
-      txnId: raw?.txnId ? String(raw.txnId) : undefined,
-      bankName: raw?.bankName ? String(raw.bankName) : undefined,
-      chequeNumber: raw?.chequeNumber ? String(raw.chequeNumber) : undefined,
-      chequeDate: raw?.chequeDate ? new Date(raw.chequeDate).toISOString() : undefined,
-      attachments: Array.isArray(raw?.attachments) ? raw.attachments.map((a: any) => ({
-        id: toId(a) || uid("att"),
-        kind: a?.kind,
-        name: String(a?.name || "attachment"),
-        dataUrl: a?.dataUrl,
-        uploadedAt: a?.uploadedAt ? new Date(a.uploadedAt).toISOString() : new Date().toISOString(),
-      })) : [],
-      invoiceRequest: raw?.invoiceRequest ? {
-        type: raw.invoiceRequest.type || "none",
-        status: raw.invoiceRequest.status || "none",
-        requestedById: toId(raw.invoiceRequest.requestedById) || undefined,
-        requestedByName: raw.invoiceRequest.requestedByName || undefined,
-        requestedByRole: raw.invoiceRequest.requestedByRole || undefined,
-        requestedAt: raw.invoiceRequest.requestedAt ? new Date(raw.invoiceRequest.requestedAt).toISOString() : undefined,
-        adminReviewedById: toId(raw.invoiceRequest.adminReviewedById) || undefined,
-        adminReviewedByName: raw.invoiceRequest.adminReviewedByName || undefined,
-        adminReviewedAt: raw.invoiceRequest.adminReviewedAt ? new Date(raw.invoiceRequest.adminReviewedAt).toISOString() : undefined,
-        adminRemarks: raw.invoiceRequest.adminRemarks || undefined,
-        preparedById: toId(raw.invoiceRequest.preparedById) || undefined,
-        preparedByName: raw.invoiceRequest.preparedByName || undefined,
-        preparedAt: raw.invoiceRequest.preparedAt ? new Date(raw.invoiceRequest.preparedAt).toISOString() : undefined,
-        issuedById: toId(raw.invoiceRequest.issuedById) || undefined,
-        issuedByName: raw.invoiceRequest.issuedByName || undefined,
-        issuedAt: raw.invoiceRequest.issuedAt ? new Date(raw.invoiceRequest.issuedAt).toISOString() : undefined,
-        invoiceId: toId(raw.invoiceRequest.invoiceId) || undefined,
-        invoiceNo: raw.invoiceRequest.invoiceNo || undefined,
-        holdReason: raw.invoiceRequest.holdReason || undefined,
-        clarificationQuestion: raw.invoiceRequest.clarificationQuestion || undefined,
-        clarificationAnswer: raw.invoiceRequest.clarificationAnswer || undefined,
-        rejectionReason: raw.invoiceRequest.rejectionReason || undefined,
-      } : { type: "none", status: "none" },
-      emiId: toId(raw?.emiId) || undefined,
-      emiInstallmentNo: raw?.emiInstallmentNo ?? undefined,
-      lateFeeAmount: Number(raw?.lateFeeAmount || 0),
-      status: raw?.status || "Collected",
-      verifiedAmount: raw?.verifiedAmount ?? undefined,
-      verificationMode: raw?.verificationMode ?? undefined,
-      verifiedById: toId(raw?.verifiedById) || undefined,
-      verifiedByName: raw?.verifiedByName || undefined,
-      verifiedAt: raw?.verifiedAt ? new Date(raw.verifiedAt).toISOString() : undefined,
-      verificationRemarks: raw?.verificationRemarks || undefined,
-      mismatchAmount: raw?.mismatchAmount ?? undefined,
-      invoiceId: toId(raw?.invoiceId) || undefined,
-      invoiceNo: raw?.invoiceNo || undefined,
-      invoicedById: toId(raw?.invoicedById) || undefined,
-      invoicedByName: raw?.invoicedByName || undefined,
-      invoicedAt: raw?.invoicedAt ? new Date(raw.invoicedAt).toISOString() : undefined,
-      audit: Array.isArray(raw?.audit) ? raw.audit.map((a: any) => ({
-        id: toId(a) || uid("aud"),
-        at: a?.at ? new Date(a.at).toISOString() : new Date().toISOString(),
-        byId: toId(a?.byId),
-        byName: String(a?.byName || "Unknown"),
-        byRole: String(a?.byRole || "unknown"),
-        action: String(a?.action || "update"),
-        fromStatus: a?.fromStatus,
-        toStatus: a?.toStatus,
-        remarks: a?.remarks,
-      })) : [],
-      createdAt: raw?.createdAt ? new Date(raw.createdAt).toISOString() : new Date().toISOString(),
-    }));
+    id: toId(raw),
+    receiptRef: String(raw?.receiptRef || ""),
+    studentId: toId(raw?.studentId),
+    studentName: String(raw?.studentName || raw?.studentId?.studentName || "Student"),
+    studentMobile: raw?.studentMobile ? String(raw.studentMobile) : undefined,
+    courseName: String(raw?.courseName || raw?.studentId?.courseSelected || "Course"),
+    branch: raw?.branch ? String(raw.branch) : undefined,
+    amount: Number(raw?.amount || 0),
+    mode: raw?.mode || "cash",
+    reason: raw?.reason || "admission_fee",
+    collectedAt: raw?.collectedAt ? new Date(raw.collectedAt).toISOString() : new Date().toISOString(),
+    collectedById: toId(raw?.collectedById),
+    collectedByName: String(raw?.collectedByName || raw?.collectedById?.name || "Unknown"),
+    collectorRole: raw?.collectorRole || "counselor",
+    remarks: raw?.remarks ? String(raw.remarks) : undefined,
+    txnId: raw?.txnId ? String(raw.txnId) : undefined,
+    bankName: raw?.bankName ? String(raw.bankName) : undefined,
+    chequeNumber: raw?.chequeNumber ? String(raw.chequeNumber) : undefined,
+    chequeDate: raw?.chequeDate ? new Date(raw.chequeDate).toISOString() : undefined,
+    attachments: Array.isArray(raw?.attachments) ? raw.attachments.map((a: any) => ({
+      id: toId(a) || uid("att"),
+      kind: a?.kind,
+      name: String(a?.name || "attachment"),
+      dataUrl: a?.dataUrl,
+      uploadedAt: a?.uploadedAt ? new Date(a.uploadedAt).toISOString() : new Date().toISOString(),
+    })) : [],
+    invoiceRequest: raw?.invoiceRequest ? {
+      type: raw.invoiceRequest.type || "none",
+      status: raw.invoiceRequest.status || "none",
+      requestedById: toId(raw.invoiceRequest.requestedById) || undefined,
+      requestedByName: raw.invoiceRequest.requestedByName || undefined,
+      requestedByRole: raw.invoiceRequest.requestedByRole || undefined,
+      requestedAt: raw.invoiceRequest.requestedAt ? new Date(raw.invoiceRequest.requestedAt).toISOString() : undefined,
+      adminReviewedById: toId(raw.invoiceRequest.adminReviewedById) || undefined,
+      adminReviewedByName: raw.invoiceRequest.adminReviewedByName || undefined,
+      adminReviewedAt: raw.invoiceRequest.adminReviewedAt ? new Date(raw.invoiceRequest.adminReviewedAt).toISOString() : undefined,
+      adminRemarks: raw.invoiceRequest.adminRemarks || undefined,
+      preparedById: toId(raw.invoiceRequest.preparedById) || undefined,
+      preparedByName: raw.invoiceRequest.preparedByName || undefined,
+      preparedAt: raw.invoiceRequest.preparedAt ? new Date(raw.invoiceRequest.preparedAt).toISOString() : undefined,
+      issuedById: toId(raw.invoiceRequest.issuedById) || undefined,
+      issuedByName: raw.invoiceRequest.issuedByName || undefined,
+      issuedAt: raw.invoiceRequest.issuedAt ? new Date(raw.invoiceRequest.issuedAt).toISOString() : undefined,
+      invoiceId: toId(raw.invoiceRequest.invoiceId) || undefined,
+      invoiceNo: raw.invoiceRequest.invoiceNo || undefined,
+      holdReason: raw.invoiceRequest.holdReason || undefined,
+      clarificationQuestion: raw.invoiceRequest.clarificationQuestion || undefined,
+      clarificationAnswer: raw.invoiceRequest.clarificationAnswer || undefined,
+      rejectionReason: raw.invoiceRequest.rejectionReason || undefined,
+    } : { type: "none", status: "none" },
+    emiId: toId(raw?.emiId) || undefined,
+    emiInstallmentNo: raw?.emiInstallmentNo ?? undefined,
+    lateFeeAmount: Number(raw?.lateFeeAmount || 0),
+    status: raw?.status || "Collected",
+    verifiedAmount: raw?.verifiedAmount ?? undefined,
+    verificationMode: raw?.verificationMode ?? undefined,
+    verifiedById: toId(raw?.verifiedById) || undefined,
+    verifiedByName: raw?.verifiedByName || undefined,
+    verifiedAt: raw?.verifiedAt ? new Date(raw.verifiedAt).toISOString() : undefined,
+    verificationRemarks: raw?.verificationRemarks || undefined,
+    mismatchAmount: raw?.mismatchAmount ?? undefined,
+    invoiceId: toId(raw?.invoiceId) || undefined,
+    invoiceNo: raw?.invoiceNo || undefined,
+    invoicedById: toId(raw?.invoicedById) || undefined,
+    invoicedByName: raw?.invoicedByName || undefined,
+    invoicedAt: raw?.invoicedAt ? new Date(raw.invoicedAt).toISOString() : undefined,
+    audit: Array.isArray(raw?.audit) ? raw.audit.map((a: any) => ({
+      id: toId(a) || uid("aud"),
+      at: a?.at ? new Date(a.at).toISOString() : new Date().toISOString(),
+      byId: toId(a?.byId),
+      byName: String(a?.byName || "Unknown"),
+      byRole: String(a?.byRole || "unknown"),
+      action: String(a?.action || "update"),
+      fromStatus: a?.fromStatus,
+      toStatus: a?.toStatus,
+      remarks: a?.remarks,
+    })) : [],
+    createdAt: raw?.createdAt ? new Date(raw.createdAt).toISOString() : new Date().toISOString(),
+  }));
   save(mapped);
 }
 
@@ -399,14 +356,14 @@ export function logCollection(
   const invoiceRequest: InvoiceRequest | undefined = reqType === "none"
     ? { type: "none", status: "none" }
     : {
-        type: reqType,
-        // Counselor → goes through admin first; Admin → straight to accounts.
-        status: collectorRole === "admin" ? "awaiting_accounts" : "awaiting_admin_review",
-        requestedById: by.id,
-        requestedByName: by.name,
-        requestedByRole: by.role,
-        requestedAt: new Date().toISOString(),
-      };
+      type: reqType,
+      // Counselor → goes through admin first; Admin → straight to accounts.
+      status: collectorRole === "admin" ? "awaiting_accounts" : "awaiting_admin_review",
+      requestedById: by.id,
+      requestedByName: by.name,
+      requestedByRole: by.role,
+      requestedAt: new Date().toISOString(),
+    };
 
   const { requestInvoiceType, ...rest } = input;
   void requestInvoiceType;

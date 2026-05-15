@@ -47,8 +47,8 @@ export default function LoginPage() {
       <div className="w-full max-w-md space-y-6">
         {/* Logo */}
         <div className="text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary shadow-lg">
-            <span className="text-2xl font-bold text-primary-foreground">RA</span>
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl">
+            <img src="/RAL-Logo-Mark.png" alt="" className="w-full h-full object-cover" />
           </div>
           <h1 className="mt-4 text-2xl font-bold text-foreground">Red Apple Learning</h1>
           <p className="text-sm text-muted-foreground mt-1">CRM Portal — Sign in to continue</p>

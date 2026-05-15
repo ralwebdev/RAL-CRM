@@ -5,7 +5,7 @@ import { protect, authorize } from '../middleware/authMiddleware.js';
 const router = express.Router();
 
 router.route('/')
-  .get(getCampaigns)
+  .get(protect, getCampaigns)
   .post(protect, authorize('marketing_manager', 'admin', 'owner'), createCampaign);
 
 router.route('/:id')
